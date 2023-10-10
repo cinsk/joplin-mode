@@ -14,6 +14,8 @@ Add this line on your init file:
     (add-to-list 'load-path 
                  (expand-file-name "*JOPLIN-MODE-PACKAGE-DIRECTORY*"))
 
+    (require 'joplin-mode)
+    
     (with-eval-after-load "markdown-mode"
       (add-to-list 'markdown-mode-hook 'joplin-note-mode))
 
@@ -21,12 +23,16 @@ In Joplin application, goto [Options]->[Web Clipper], and make sure you
 enabled the clipper service.
 
 ### Linux or Mac
+It should work.
 
 ### Windows
+The `curl(1)` shipped with Windows does not support `--compressed` option which plz 0.7 expected at the moment.  To use it, either you need to install new `curl(1)` or remove `--compressed` option from *plz*.  For the latter, you can add folowing lisp code in your Emacs init file:
 
+    (setq plz-curl-default-args (delete "--compressed" plz-curl-default-args)
+    
 ### Windows /w Emacs on WSL
 
-You can still use your Emacs on WSL(Windows subsystem for Linux) with `joplin-mode`.
+This section assumes that you have WSL2 (Widnows subsystem for Linux) and did not change the network configuration of it.   Since, your Linux box is placed on a private network range, and JoplinApp only listen to 127.0.0.0 network, you cannot connect Joplin from your Linux box.  However, if you deploy proxy server on Windows, and let `joplin-mode` to connect to the proxy first, then you can use it.
 
 First, check the IP address of the Windows from WSL.  Open the file `/etc/resolv.conf` and you can get the Windows IP address from the `nameserver` field.  (See [Accessing network applications with WSL](https://learn.microsoft.com/en-us/windows/wsl/networking) for more details.
 

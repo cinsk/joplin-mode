@@ -1,11 +1,13 @@
+# joplin-mode
+Emacs client for accessing Joplin note
 
-# Requirements
+## Requirements
 
 - [markdown-mode](https://github.com/jrblevin/markdown-mode)
 - [plz](https://github.com/alphapapa/plz.el)
   - *plz* requires `curl(1)` on your system
 
-# Installation
+## Installation
 
 Add this line on your init file:
 
@@ -18,11 +20,11 @@ Add this line on your init file:
 In Joplin application, goto [Options]->[Web Clipper], and make sure you
 enabled the clipper service.
 
-## Linux or Mac
+### Linux or Mac
 
-## Windows
+### Windows
 
-## Windows /w Emacs on WSL
+### Windows /w Emacs on WSL
 
 You can still use your Emacs on WSL(Windows subsystem for Linux) with `joplin-mode`.
 
@@ -44,14 +46,14 @@ Make sure that you enabled Web Clipper service in Joplin.  To test it, from your
 
 If you get the string "JoplinClipperServer", congratulation!  Now you can access Joplin from Emacs on WSL.
     
-# Usage
+## Usage
 
 If you use `joplin-mode` first time, it will ask your permission to
 get API token.  Make sure you allow it in Joplin application, then in
 Emacs, press `Return` (or `Enter`) key.
 
 
-## `joplin-mode`: Joplin Notebook buffer 
+### `joplin-mode`: Joplin Notebook buffer 
 
 `M-x joplin` will list up all of your notebooks.  Unfortunately, there is nothing much you can do at the moment.
 
@@ -60,7 +62,7 @@ Emacs, press `Return` (or `Enter`) key.
 - `C-p` or `p`: move to the previous folder 
 - `s`: search note (or `M-x joplin-search`)
 
-## `joplin-search-mode`: Joplin Note Search buffer
+### `joplin-search-mode`: Joplin Note Search buffer
 
 `M-x joplin-search` will accept query string, and list the notes that match.
 
@@ -77,7 +79,7 @@ Emacs, press `Return` (or `Enter`) key.
 
 For query format, see [Joplin Search Syntax](https://discourse.joplinapp.org/t/search-syntax-documentation/9110).
 
-## `joplin-note-mode`: Joplin Note buffer
+### `joplin-note-mode`: Joplin Note buffer
 
 There are two types of note buffer in `joplin-mode`:
 
@@ -87,5 +89,4 @@ There are two types of note buffer in `joplin-mode`:
   - If you press `C-c j s`, `joplin-note-mode` will save the note to whatever associated file in your local file system, then upload the note to the Joplin, and de-associated the buffer with whatever file in your local file system.  Any subsequent saving action will update the note in Jolin app.
   - You'll need to provide the note title and notebook name.
  
-
 

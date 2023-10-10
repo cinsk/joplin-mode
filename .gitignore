@@ -1,14 +1,20 @@
 # Files that GIT should ignore
 # See gitignore(5) for the format of this file
 
+# Compiled
+*.elc
+
+# Packaging
+.cask
+
+# Backup files
+*~
+
 # tramp -- Tramp connection history
 /tramp
+
 # generated etags file(s)
 /TAGS*
-*~
-*.elc
+
 /scratch.el
 /joplin-mode-autoloads.el
-/out
-*.json
-*.png

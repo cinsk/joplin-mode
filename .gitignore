@@ -8,3 +8,7 @@
 *~
 *.elc
 /scratch.el
+/joplin-mode-autoloads.el
+/out
+*.json
+*.png

@@ -440,8 +440,8 @@ It will move the point to the corresponding folder"
            "Switch to Joplin App, then accept authorization request [RET]: ")
           (setq token (alist-get 'token
                                  (joplin--http-get "/auth/check"
-                                                   `((auth_token . ,auth)))))
-          token))
+                                                   `((auth_token . ,auth))))))
+        token)
     (error (joplin--error 'error "%s" e)
            ;; (signal (car e) (cdr e))
            nil
@@ -550,6 +550,7 @@ It will move the point to the corresponding folder"
 
 (defun joplin-save-note (&optional arg)
   (interactive "p")
+  (joplin--init)
   (if (and (boundp 'joplin-temp-file)
            joplin-temp-file)
       nil

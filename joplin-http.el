@@ -36,7 +36,7 @@ This should not contain directory component as the filename
 will be appended to the variable, `user-emacs-directory'.")
 
 (defvar joplin-endpoint "http://127.0.0.1:41184")
-(defvar joplin-curl-args '("--proxy" "http://172.22.144.1:8080")
+(defvar joplin-curl-args '()
   "Additional arguments to curl(1).  Useful for accessing Joplin through the proxy")
 
 (defvar joplin-context nil)

@@ -45,9 +45,15 @@
     (while (not (eq (alist-get 'has_more resp) :json-false))
       (cl-incf (alist-get 'page context))
       (setq resp (joplin--http-get "/search" context))
-      (let ((items (alist-get 'items resp)))
+      (let ((items (alist-get 'items resp))
+            notes)
         (dotimes (i (length items))
-          (iter-yield (build-JNOTE (aref items i))))))))
+          (push (build-JNOTE (aref items i)) notes))
+
+        (setq notes (sort notes (lambda (a b) (> (JNOTE-order a) (JNOTE-order b)))))
+
+        (dolist (n notes)
+          (iter-yield n))))))
 
 (provide 'joplin-gen)
 ;;; joplin-gen.el ends here

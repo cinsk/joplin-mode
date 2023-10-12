@@ -66,6 +66,13 @@ will be appended to the variable, `user-emacs-directory'.")
       :body (json-encode body)
       )))
 
+(defun joplin--http-del (url &optional context)
+  "PUT method with an alist BODY to URL with CONTEXT (query-string)"
+  (let ((plz-curl-default-args (append joplin-curl-args plz-curl-default-args)))
+    (plz 'delete
+      (joplin--build-url url (append context joplin-context))
+      )))
+
 (defun joplin--build-url (&optional path ctx)
   (let (qslst url)
     (dolist (p ctx)

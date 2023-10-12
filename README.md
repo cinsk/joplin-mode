@@ -85,6 +85,29 @@ Emacs, press `Return` (or `Enter`) key.
 
 For query format, see [Joplin Search Syntax](https://discourse.joplinapp.org/t/search-syntax-documentation/9110).
 
+You can mark(select) multiple notes, then do certain operations in
+bulk.  For example, moving one or more notes to another
+folder(notebook).
+
+- `m`: mark current note
+- `u`: unmark current note
+- `U`: unmark all notes
+- `t`: toggle marks
+- `% m`: mark notes that matches with regular expression
+
+- `d`: flag current note for deletion
+- `% d`: flag notes that matches with regular expression
+
+- `M`: move marked notes to specific notebook
+- `x`: delete all flagged notes
+
+You can sort the list of notes in the search buffer:
+
+- `S t`: sort by note title 
+- `S u`: sort by updated time of the note
+- `S c`: sort by created time of the note
+
+
 ### `joplin-note-mode`: Joplin Note buffer
 
 There are two types of note buffer in `joplin-mode`:

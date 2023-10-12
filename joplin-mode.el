@@ -126,44 +126,41 @@ An empty string is used for the root folder id.")
       (setq items (vconcat items (cdr (assoc 'items resp)))))
     items))
 
-(defun joplin---build-pcmap (folders)
-  "DEPRECATED -- Build a ALIST of (FOLDER-ID . (CHILD-ID ...)) from a vector, FOLDERS"
-  (let (pcmap)
-    (dotimes (i (length folders))
-      (let ((item (aref folders i)))
-        (let ((parent (cdr (assoc 'parent_id item))))
-          (let ((record (assoc parent pcmap)))
-            (if record
-                ;; (setcdr record (cons (cdr (assoc 'id item)) (cdr record)))
-                (setcdr record (append (cdr record) (list (cdr (assoc 'id item)))))
-              (setq pcmap (append pcmap (list (cons (cdr (assoc 'parent_id item))
-                                                    (list (cdr (assoc 'id item))))))))))))
-    pcmap))
 
 (defun joplin--build-idmap (folders)
-  "Build an alist of (FOLDER-ID . JFOLDER)"
+  "Build an alist of (FOLDER-ID . JFOLDER) from FOLDERS
+
+FOLDERS is a vector of alist of Joplin folder fields, available
+from `joplin--load-folders'."
   (let (idmap)
     (dotimes (i (length folders))
       (let ((item (aref folders i)))
-        (let ((fdr (make-JFOLDER :id (cdr (assoc 'id item))
-                                 :parent_id (cdr (assoc 'parent_id item))
-                                 :title (cdr (assoc 'title item)))))
-          (setq idmap (cons (cons (cdr (assoc 'id item)) fdr) idmap)))))
+        (let ((fdr (make-JFOLDER :id (alist-get 'id item)
+                                 :parent_id (alist-get 'parent_id item)
+                                 :title (alist-get 'title item))
+                   ))
+          (setq idmap (cons (cons (alist-get 'id item) fdr)
+                            idmap)))))
     idmap))
 
 (defun joplin--build-pcmap (folders idmap)
   "Build an ALIST of (FOLDER-ID . (CHILD-JFOLDER ...)) from a vector, FOLDERS"
   (let (pcmap)
     (dotimes (i (length folders))
-      (let ((item (aref folders i)))
-        (let ((parent (cdr (assoc 'parent_id item))))
-          (let ((record (assoc parent pcmap)))
+      (let* ((item (aref folders i))
+             (parent (alist-get 'parent_id item))
+             (record (assoc parent pcmap)))
             (if record
-                ;; (setcdr record (cons (cdr (assoc 'id item)) (cdr record)))
-                (setcdr record (append (cdr record) (list (cdr (assoc (cdr (assoc 'id item)) idmap)))))
-              (setq pcmap (append pcmap (list (cons (cdr (assoc 'parent_id item))
-                                                    (list (cdr (assoc (cdr (assoc 'id item)) idmap)))
-                                                    )))))))))
+                (setcdr record
+                        (nconc (cdr record)
+                               (list (cdr (assoc (alist-get 'id item)
+                                                 idmap)))))
+              (setq pcmap
+                    (nconc pcmap
+                           (list (cons (alist-get 'parent_id item)
+                                       (list (cdr (assoc (alist-get 'id item)
+                                                         idmap)))
+                                       )))))))
     pcmap))
 
 (defun joplin--init-folders ()
@@ -202,7 +199,9 @@ An empty string is used for the root folder id.")
   (let ((info-ctx (list '(fields . "id,parent_id,title,created_time,updated_time,is_conflict,latitude,longitude,altitude,author,source_url,is_todo,todo_due,todo_completed,source,source_application,application_data,order,user_updated_time,user_created_time,encryption_cipher_text,encryption_applied,markup_language,is_shared,share_id,conflict_original_id,master_key_id,user_data,source")))
         src note)
     (setq src (joplin--http-get (concat "/notes/" id) info-ctx))
-    (build-JNOTE src)))
+    (let ((n (build-JNOTE src)))
+      (setf (JNOTE-_readall n) t)
+      n)))
 
 (defun joplin-note-buffer (id &optional buffer)
   "Return the Joplin note buffer.
@@ -299,6 +298,7 @@ The buffer contains local variable 'joplin-note, pointing the JNOTE struct of th
         (define-key map [(?i)] #'joplin-show-folder-properties)
         (define-key map [(?g)] #'joplin-sync-folders)
         (define-key map [(?s)] #'joplin-search)
+        (define-key map [(?/)] #'joplin-search)
         ;;(define-key map [(?c)] #'joplin-new-note)
         (define-key map [?q] #'(lambda ()
                                  (interactive)
@@ -572,7 +572,7 @@ It will move the point to the corresponding folder"
   ;; Reminder.  This function should return non-nil as it is part of
   ;; variable `write-file-functions'.  Since `joplin--update-note' and
   ;; `joplin--register-note' both return note id, it should work.
-)
+  )
 
 ;;;###autoload
 (define-minor-mode joplin-note-mode
@@ -603,7 +603,7 @@ It will move the point to the corresponding folder"
   (setq-local buffer-read-only t
               joplin-notes ()
               joplin-visible-fields (copy-alist '((id . t)
-                                                  (created_time . t)
+                                                  (created_time . nil)
                                                   (updated_time . t)
                                                   (title . t)))
               joplin-eob-marker (point-min-marker)
@@ -643,9 +643,32 @@ It will move the point to the corresponding folder"
         (define-key map [(control ?c) (control ?j)] #'joplin-jump-to-folder)
         (define-key map [(control ?c) ?j ?j] #'joplin-jump-to-folder)
 
+        (define-key map [?S ?o] #'joplin-search-sort-notes-by-order)
+        (define-key map [?S ?i] #'joplin-search-sort-notes-by-id)
+        (define-key map [?S ?t] #'joplin-search-sort-notes-by-title)
+        (define-key map [?S ?u] #'joplin-search-sort-notes-by-updated_time)
+        (define-key map [?S ?c] #'joplin-search-sort-notes-by-created_time)
+
         (define-key map [?q] #'quit-window)
-        (define-key map [?o] #'joplin-search-visit-note-other-window)
+        ;;(define-key map [?o] #'joplin-search-visit-note-other-window)
         (define-key map [?\r] #'joplin-search-visit-note)
+
+        (define-key map [?i] #'joplin-search-note-info)
+
+        (define-key map [?m] #'joplin-search-mark)
+        (define-key map [?u] #'joplin-search-unmark)
+        (define-key map [?U] #'joplin-search-unmark-all)
+        (define-key map [?d] #'joplin-search-flag-note-for-delete)
+
+        (define-key map [?* ?c] #'joplin-search-change-marks)
+        (define-key map [?* ?d] #'joplin-search-mark-notes-regexp)
+        (define-key map [?% ?m] #'joplin-search-mark-notes-regexp)
+        (define-key map [?% ?d] #'joplin-search-flag-notes-regexp)
+
+        (define-key map [?t] #'joplin-search-toggle-marks)
+
+        (define-key map [?M] #'joplin-search-move-notes)
+        (define-key map [?x] #'joplin-search-delete-notes)
         map))
 
 (defun joplin--note-buffer-name (note)
@@ -733,6 +756,9 @@ It will move the point to the corresponding folder"
   (let (text items)
     (set-marker joplin-eob-marker (point))
 
+    (let ((m (JNOTE-_marked note)))
+      (setq items (cons (format "%1s" (or m "")) items)))
+
     (when (alist-get 'id joplin-visible-fields)
       (let ((jid (JNOTE-id note))
             short ps)
@@ -774,6 +800,341 @@ It will move the point to the corresponding folder"
                     ))
     (let ((ol (make-overlay joplin-eob-marker (point))))
       (overlay-put ol 'joplin-note note))
+    (set-marker joplin-eob-marker (point))))
+
+
+;; TODO: enable third-party minor modes may add additional overlay to
+;; the buffer.  Should handle properly
+(defun joplin--search-note-from-overlay ()
+  (let (note)
+    (cl-loop for o in (overlays-at (point))
+             when (setq note (overlay-get o 'joplin-note)) return note)))
+
+(defun joplin--search-note-overlay ()
+  (let (ol)
+    (cl-loop for o in (overlays-at (point))
+             when (setq ol (when (overlay-get o 'joplin-note) o)) return ol)))
+
+
+(defun joplin--search-next-note-pos (pos)
+  (if (get-text-property pos 'jnote)
+      pos
+    (next-single-property-change pos 'jnote)))
+
+
+(defun joplin--search-note-position (id &optional startpos)
+  "buffer position of the note title matched with ID starting from STARTPOS"
+  (let ((pos (or startpos (point-min))) done jnote)
+    (while (and (not done)
+                (setq pos (joplin--search-next-note-pos pos)))
+      (setq jnote (get-text-property pos 'jnote))
+      (if (string-equal (JNOTE-id jnote) id)
+          (setq done t)
+        (setq pos (next-single-property-change pos 'jnote))))
+    pos))
+
+(defun joplin-search-toggle-id ()
+  (interactive)
+  (let ((val (alist-get 'id joplin-visible-fields)) noteid)
+    (setf (alist-get 'id joplin-visible-fields) (not val))
+
+    (let ((note (joplin--search-note-from-overlay)))
+      (when note
+        (setq noteid (JNOTE-id note))))
+
+    (joplin--search-rerender)
+
+    (let ((pos (joplin--search-note-position noteid)))
+      (when pos
+        (goto-char pos)))))
+
+(defun joplin-search-toggle-created-time ()
+  (interactive)
+  (let ((val (alist-get 'created_time joplin-visible-fields)) noteid)
+    (setf (alist-get 'created_time joplin-visible-fields) (not val))
+
+    (let ((note (joplin--search-note-from-overlay)))
+      (when note
+        (setq noteid (JNOTE-id note))))
+
+    (joplin--search-rerender)
+
+    (let ((pos (joplin--search-note-position noteid)))
+      (when pos
+        (goto-char pos)))))
+
+(defun joplin-search-toggle-updated-time ()
+  (interactive)
+  (let ((val (alist-get 'updated_time joplin-visible-fields)) noteid)
+    (setf (alist-get 'updated_time joplin-visible-fields) (not val))
+
+    (let ((note (joplin--search-note-from-overlay)))
+      (when note
+        (setq noteid (JNOTE-id note))))
+
+    (joplin--search-rerender)
+
+    (let ((pos (joplin--search-note-position noteid)))
+      (when pos
+        (goto-char pos)))))
+
+(defun joplin--search-rerender ()
+  ;; render the buffer using `joplin-notes' list
+  (let ((inhibit-read-only t))
+    (erase-buffer)
+    (set-marker joplin-eob-marker (point-min))
+
+    (save-restriction
+      (widen)
+      (goto-char (point-max))
+      (cl-dolist (note joplin-notes)
+        ;; render
+        (joplin--render-note note)))))
+
+(defun joplin--search-load ()
+  ;; render the buffer & fill buffer local data
+  (let ((inhibit-read-only t)
+        note)
+    (when joplin-search-iter
+      (if (>= joplin-search-count joplin-search-limit)
+          (setq joplin-search-limit
+                (+ joplin-search-limit joplin-limit-per-search)))
+      (save-restriction
+        (widen)
+        (goto-char (point-max))
+        (let (l)
+          (condition-case x
+              (while (< joplin-search-count joplin-search-limit)
+                (setq note (iter-next joplin-search-iter))
+                (setq l (cons note l))
+
+                ;; render
+                (joplin--render-note note)
+
+                (setq joplin-search-count (1+ joplin-search-count)))
+            (iter-end-of-sequence
+             (setq joplin-search-iter nil)))
+
+          (setq joplin-notes (append joplin-notes (nreverse l)))
+          ))
+      (message "%d notes found(s). %s" joplin-search-count
+               (if joplin-search-iter "--more" "")))))
+
+
+;; (defun joplin--search-norm-point (&optional arg)
+(defun joplin-search-point-to-title (&optional arg)
+  "Move the point to the beginning of the note title"
+  ;; Assumes that note title does not starts at the beginning of the line
+  (let ((bol (line-beginning-position))
+        (eol (line-end-position))
+        pos)
+    ;; TODO: use text-property-search-forward?
+    ;; NO I don't think so, it looks bulkier than next-single-property-change
+    (if (get-text-property bol 'jnote)
+        (goto-char bol)
+      (setq pos (next-single-property-change bol 'jnote nil eol))
+      (if pos
+          (goto-char pos)))))
+
+(defun joplin-search-next-line (arg &optional interactive)
+  "Move cursor vertically down ARG lines.
+
+Similar to \\[next-line], tuned to JoplinSearch buffer"
+  (interactive (list (prefix-numeric-value current-prefix-arg) t))
+  (or arg (setq arg 1))
+
+  (when interactive
+    ;; check if there's more note to load
+    ;; TODO: async processing would be nice
+    (when (and joplin-search-iter
+               ;; below may not correct if narrow-to-region is in effect.
+               (pos-visible-in-window-p (point-max)))
+      (save-excursion
+        (joplin--search-load))))
+
+  (let ((ret (forward-line arg)))
+    (joplin-search-point-to-title)
+    ret))
+
+(defun joplin-search-previous-line (&optional arg)
+  "Move cursor vertically up ARG lines.
+
+Similar to \\[previous-line], tuned to JoplinSearch buffer"
+  (interactive "p")
+  (or arg (setq arg 1))
+  (forward-line (- arg))
+  (joplin-search-point-to-title))
+
+(defun joplin-search-debug (&optional arg)
+  (interactive)
+  (message "limit(%d) count(%d/%d) iter(%s)"
+           joplin-limit-per-search
+           joplin-search-count
+           joplin-search-limit
+           (if joplin-search-iter "t" "nil")))
+
+;; (defun joplin-search-mark (arg &optional interactive)
+;;   (interactive (list current-prefix-arg t))
+;;   (cond ((and interactive (use-region-p))
+;;          (save-excursion
+;;            (let ((beg (region-beginning))
+;;                  (end (region-end)))
+;;              (joplin-search-mark-notes-in-region
+;;               (progn (goto-char beg) (line-beginning-position))
+;;               (progn (goto-char end) (line-beginning-position))))))
+;;         (t
+;;          (let ((inhibit-read-only t))
+;;            (joplin-repeat-over-lines
+;;             (prefix-numeric-value arg)
+;;             (lambda () (delete-char 1) (insert dired-marked-char)))))))
+
+
+
+;;(add-hook 'markdown-mode-hook 'joplin-note-mode)
+
+;;(defun joplin-resource-post (file)
+;;  (when (file-readable-p file)
+
+;; (defun joplin-search-repeat-over-notes (lines function)
+
+
+(defun joplin--note-buffer-name (note)
+  (format "*JoplinNote:%s*" (JNOTE-id note)))
+
+(defun joplin-search-visit-note (&optional arg)
+  (interactive)
+  ;; (joplin-note-buffer "id")
+  (let* ((note (joplin--search-note-from-overlay))
+         (bufname (joplin--note-buffer-name note)))
+    (when note
+      (let ((buf (get-buffer bufname)))
+        (if buf
+            (switch-to-buffer buf)
+          (setq buf (get-buffer-create bufname))
+          (joplin-note-buffer (JNOTE-id note) buf)
+          (switch-to-buffer buf)
+          )))))
+
+
+(defun joplin-clear-search (&optional arg)
+  (interactive)
+  (let ((inhibit-read-only t))
+    (erase-buffer)
+    (set-marker joplin-eob-marker (point-min))
+    (setq joplin-notes ()
+          joplin-search-iter nil
+          joplin-search-count 0
+          joplin-search-limit joplin-limit-per-search
+          joplin-search-text "")))
+
+(defun joplin--search-buffer ()
+  "Return Joplin Search buffer, create one if none exists."
+  (if (eq major-mode 'joplin-search-mode)
+      (current-buffer)
+    (let ((buf (get-buffer-create joplin-search-buffer-name)))
+      (with-current-buffer buf
+        (joplin-search-mode)
+        (current-buffer)))))
+
+;;;###autoload
+(defun joplin-search (&optional prefix text)
+  (interactive "p\nssearch: ")
+
+  (joplin--init)
+  (let ((buf (joplin--search-buffer)))
+    (when (> (length text) 0)
+      (let ((iter (joplin--search-notes-by-text text)))
+
+        (with-current-buffer buf
+          (joplin-clear-search)
+          (setq joplin-search-iter iter
+                joplin-search-text text)
+          (joplin--search-load)
+          (goto-char (point-min))
+          (joplin-search-point-to-title))))
+    (pop-to-buffer buf)))
+
+(defun joplin-search-revert (&optional arg)
+  "Replace current search buffer text with JoplinApp search result."
+  (interactive "p")
+
+  (let (noteid)
+    (let ((note (joplin--search-note-from-overlay)))
+      (when note
+        (setq noteid (JNOTE-id note))))
+
+    (when (> (length joplin-search-text) 0)
+      (let ((iter (joplin--search-notes-by-text joplin-search-text)))
+        (setq joplin-notes ()
+              joplin-search-iter iter
+              joplin-search-count 0))
+
+      (let ((inhibit-read-only t))
+        (erase-buffer)
+        (set-marker joplin-eob-marker (point-min)))
+
+      (joplin--search-load))
+
+    (let ((pos (joplin--search-note-position noteid)))
+      (when pos
+        (goto-char pos)))))
+
+(defun joplin--render-note (note &optional update)
+  (let (text items)
+    (set-marker joplin-eob-marker (point))
+
+    (if update
+        (delete-region (line-beginning-position) (line-end-position)))
+
+    (let ((m (JNOTE-_marked note)))
+      (setq items (cons (format "%1s" (or m "")) items)))
+
+    (when (alist-get 'id joplin-visible-fields)
+      (let ((jid (JNOTE-id note))
+            short ps)
+        (setq short (format "%-7s" (if (> (length jid) 7)
+                                       (substring jid 0 7)
+                                     ""))
+              ps (propertize short
+                             'face 'joplin-note-id-face
+                             'jfield 'id)
+              items (cons ps items))))
+
+    (when (alist-get 'created_time joplin-visible-fields)
+      (let ((tm (JNOTE-created_time note))
+            tmstr ps)
+        (setq tmstr (format "%-14s" (if tm
+                                        (joplin--time-string-short tm) ""))
+              ps (propertize tmstr
+                             'face 'joplin-note-created-time-face
+                             'jfield 'created_time)
+              items (cons ps items))))
+
+    (when (alist-get 'updated_time joplin-visible-fields)
+      (let ((tm (JNOTE-updated_time note))
+            tmstr ps)
+        (setq tmstr (format "%-14s" (if tm
+                                        (joplin--time-string-short tm) ""))
+              ps (propertize tmstr
+                             'face 'joplin-note-updated-time-face
+                             'jfield 'updated_time)
+              items (cons ps items))))
+
+    (setq text (string-join (nreverse items) " "))
+    (insert (format "%s  %s" text
+                    (propertize (JNOTE-title note)
+                                'face 'joplin-note-title-face
+                                'jfield 'title
+                                'jnote note
+                                )
+                    ))
+    (if update
+        (let ((ol (joplin--search-note-overlay)))
+          (overlay-put ol 'joplin-note note))
+      (insert "\n")
+      (let ((ol (make-overlay joplin-eob-marker (point))))
+        (overlay-put ol 'joplin-note note)))
+
     (set-marker joplin-eob-marker (point))))
 
 
@@ -905,24 +1266,26 @@ It will move the point to the corresponding folder"
       (if pos
           (goto-char pos)))))
 
-(defun joplin-search-next-line (&optional arg)
+(defun joplin-search-next-line (arg &optional interactive)
   "Move cursor vertically down ARG lines.
 
 Similar to \\[next-line], tuned to JoplinSearch buffer"
-  (interactive "p")
+  (interactive (list (prefix-numeric-value current-prefix-arg) t))
   (or arg (setq arg 1))
 
-  ;; check if there's more note to load
-  ;; TODO: async processing would be nice
-  (when (and joplin-search-iter
-             ;; below may not correct if narrow-to-region is in effect.
-             (pos-visible-in-window-p (point-max)))
-    (save-excursion
-      (joplin--search-load)))
+  (joplin--error 'debug "(joplin-search-next-line %d)" arg)
+  (when interactive
+    ;; check if there's more note to load
+    ;; TODO: async processing would be nice
+    (when (and joplin-search-iter
+               ;; below may not correct if narrow-to-region is in effect.
+               (pos-visible-in-window-p (point-max)))
+      (save-excursion
+        (joplin--search-load))))
 
-  (forward-line arg)
-  (joplin-search-point-to-title)
-  )
+  (let ((ret (forward-line arg)))
+    (joplin-search-point-to-title)
+    ret))
 
 (defun joplin-search-previous-line (&optional arg)
   "Move cursor vertically up ARG lines.
@@ -930,8 +1293,11 @@ Similar to \\[next-line], tuned to JoplinSearch buffer"
 Similar to \\[previous-line], tuned to JoplinSearch buffer"
   (interactive "p")
   (or arg (setq arg 1))
-  (forward-line (- arg))
-  (joplin-search-point-to-title))
+
+  ;; TODO: check return value to align with next-line function
+  (let ((ret (forward-line (- arg))))
+    (joplin-search-point-to-title)
+    ret))
 
 (defun joplin-search-debug (&optional arg)
   (interactive)
@@ -941,11 +1307,393 @@ Similar to \\[previous-line], tuned to JoplinSearch buffer"
            joplin-search-limit
            (if joplin-search-iter "t" "nil")))
 
+;; (defun joplin-search-mark (arg &optional interactive)
+;;   (interactive (list current-prefix-arg t))
+;;   (cond ((and interactive (use-region-p))
+;;          (save-excursion
+;;            (let ((beg (region-beginning))
+;;                  (end (region-end)))
+;;              (joplin-search-mark-notes-in-region
+;;               (progn (goto-char beg) (line-beginning-position))
+;;               (progn (goto-char end) (line-beginning-position))))))
+;;         (t
+;;          (let ((inhibit-read-only t))
+;;            (joplin-repeat-over-lines
+;;             (prefix-numeric-value arg)
+;;             (lambda () (delete-char 1) (insert dired-marked-char)))))))
+
+
+
 ;;(add-hook 'markdown-mode-hook 'joplin-note-mode)
 
 ;;(defun joplin-resource-post (file)
 ;;  (when (file-readable-p file)
 
+;; (defun joplin-search-repeat-over-notes (lines function)
+
+(defun joplin-search-mark (arg &optional interactive)
+  (interactive (list (prefix-numeric-value current-prefix-arg) t))
+  (or arg (setq arg 1))
+
+  (dotimes (n arg)
+    (joplin--search-mark-line "*")
+    (joplin-search-next-line 1)))
+
+(defun joplin-search-unmark (arg &optional interactive)
+  (interactive (list (prefix-numeric-value current-prefix-arg) t))
+  (or arg (setq arg 1))
+
+  (dotimes (n arg)
+    (joplin--search-mark-line nil)
+    (joplin-search-next-line 1)))
+
+(defun joplin-search-toggle-marks (arg &optional interactive)
+  (interactive (list (prefix-numeric-value current-prefix-arg) t))
+  (or arg (setq arg 1))
+
+  (let ((cont t))
+    (save-excursion
+      ;; TODO: do I need `save-match-data'?
+      (goto-char (point-min))
+
+      (while cont
+        (let ((note (joplin--search-note-from-overlay)))
+          (when note
+            (let ((mark (JNOTE-_marked note)))
+              (joplin--search-mark-line (cond ((null mark) "*")
+                                              ((string-equal mark "*") nil)
+                                              (t mark))
+                                        note))))
+        (setq cont (= (joplin-search-next-line 1) 0))))))
+
+
+(defun joplin-search-change-marks (&optional old new)
+  (interactive
+   (let* ((cursor-in-echo-area t)
+          (old (progn (message "Change (old mark): ") (read-char)))
+          (new (progn (message  "Change %c marks to (new mark): " old)
+                      (read-char))))
+     (list old new)))
+
+  (setq old (make-string 1 old)
+        new (make-string 1 new))
+
+  (let ((cont t))
+    (save-excursion
+      ;; TODO: do I need `save-match-data'?
+      (goto-char (point-min))
+
+      (while cont
+        (let ((note (joplin--search-note-from-overlay)))
+          (when note
+            (let ((mark (JNOTE-_marked note)))
+              (if (and mark (string-equal mark old))
+                  (joplin--search-mark-line new note)))))
+        (setq cont (= (joplin-search-next-line 1) 0))))))
+
+(defun joplin-search-flag-note-for-delete (arg &optional interactive)
+  (interactive (list (prefix-numeric-value current-prefix-arg) t))
+  (or arg (setq arg 1))
+
+  (dotimes (n arg)
+    (joplin--search-mark-line "D")
+    (joplin-search-next-line 1)))
+
+
+(defvar joplin-regexp-history nil)
+
+(defun joplin-search-mark-notes-regexp (regexp &optional marker-char)
+  (interactive
+   (list (read-regexp (concat (if current-prefix-arg "Unmark" "Mark")
+                              " notes (regexp): ")
+                      nil
+                      'joplin-regexp-history)
+         (if current-prefix-arg nil "*")))
+
+  (let ((cont t))
+    (save-excursion
+      ;; TODO: do I need `save-match-data'?
+      (goto-char (point-min))
+
+      (while cont
+        (let ((note (joplin--search-note-from-overlay)))
+          (when note
+            (if (string-match regexp (JNOTE-title note))
+                (joplin--search-mark-line marker-char))))
+        (setq cont (= (joplin-search-next-line 1) 0))))))
+
+(defun joplin-search-flag-notes-regexp (regexp &optional marker-char)
+  (interactive
+   (list (read-regexp "Flag for deletion (regexp): " nil
+                      'joplin-regexp-history)))
+  (joplin-search-mark-notes-regexp regexp "D"))
+
+(defun joplin-search-unmark-all (&optional arg)
+  (interactive "p")
+  (or arg (setq arg 1))
+
+  (save-excursion
+    (goto-char (point-min))
+    ;; below loop calls (joplin--search-mark-line) one more time
+    ;; around end of the buffer, but no harm done.
+    (joplin--search-mark-line nil)
+    (while (= (joplin-search-next-line 1) 0)
+      (joplin--search-mark-line nil))))
+
+(defun joplin--search-delete-line ()
+  ; not sure to use `delete-line'.
+  (delete-region (line-beginning-position) (line-beginning-position 2))
+  )
+
+(defun joplin--search-mark-line (markchar &optional note)
+  "Mark the note in the current line with MARKCHAR.
+
+To unset the mark, pass nil instead of \" \".
+If you already know JNOTE struct of the current line, pass it
+as NOTE to speed up."
+  ;; to unset, use nil rather than " ".
+  ;; No save-excursion. No inhibit-read-only
+  (let ((n (or note (joplin--search-note-from-overlay))))
+    (when n
+      (let ((inhibit-read-only t))
+        (beginning-of-line)
+        (when (re-search-forward "^." (line-end-position) t 1)
+          (replace-match (or markchar " ")))
+        (setf (JNOTE-_marked n) markchar)))))
+
+(defun joplin--remove-matched-notes (set objs)
+  "Remove note struct from SET where it also appears in OBJS
+
+The ordering in SET should be identical to that of OBJS.  For example,
+(joplin--remove-matched '(a b c d) '(b c)) return '(a d)."
+  (let (newlst srst drst)
+    (while set
+      (if (not objs)
+          (setq newlst (append (reverse set) newlst)
+                set nil)
+        (if (string-equal (JNOTE-id (car set)) (JNOTE-id (car objs)))
+            (setq set (cdr set)
+                  objs (cdr objs))
+          (setq newlst (cons (car set) newlst)
+                set (cdr set)))))
+    (nreverse newlst)))
+
+(defun joplin--search-do-marked (func &optional markchar)
+  ;; call FUNC on each marked note in the buffer.
+  ;;
+  ;; FUNC will receive one argument, note struct.
+  ;; if it returns non-nil, the line will be removed from the buffer.
+  ;; MARKCHAR is a single char string.
+  (let ((inhibit-read-only t)
+        (cont t)
+        (chstr (or markchar "*"))
+        rem lst)
+    (save-excursion
+      ;; TODO: do I need `save-match-data'?
+      (goto-char (point-min))
+
+      (while cont
+        (let ((note (joplin--search-note-from-overlay)))
+          (when note
+            (let ((mark (JNOTE-_marked note)))
+              (when (and mark (string-equal mark chstr))
+                (joplin--error 'debug "run PROC (note:%s)" (JNOTE-id note))
+                (setq lst (cons note lst))
+                (if (setq rem (funcall func note))
+                    (delete-line))
+                ))))
+        (if rem
+            (setq rem nil)
+          (setq cont (= (joplin-search-next-line 1) 0)))))
+    (nreverse lst)))
+
+
+(defun joplin--search-mapcar (func)
+  ;; call FUNC on each marked note in the buffer.
+  ;;
+  ;; FUNC will receive one argument, note struct.
+  ;; if it returns non-nil, the line will be removed from the buffer.
+  (let ((cont t) ret lst)
+    (save-excursion
+      ;; TODO: do I need `save-match-data'?
+      (goto-char (point-min))
+
+      (while cont
+        (let ((note (joplin--search-note-from-overlay)))
+          (when note
+            (setq ret (funcall func note)
+                  lst (cons ret lst))))
+        (setq cont (= (joplin-search-next-line 1) 0))))
+    (nreverse lst)))
+
+(defun joplin--move-note (note-id folder-id)
+  (let ((resp (joplin--http-put (concat "/notes/" note-id)
+                               `((parent_id . ,folder-id)))))
+    (build-JNOTE resp)))
+
+(defun joplin--delete-note (note-id)
+  (joplin--http-del (concat "/notes/" note-id)))
+
+
+(defun joplin-search-note-info ()
+  (interactive)
+  (let ((note (joplin--search-note-from-overlay)))
+    (when note
+      (message "%s\n_mark [%s], _readall[%s], _tags[%s], order[%s]
+id: %s\nparent_id: %s [%s]
+created_time: %s\nupdated_time: %s"
+               (JNOTE-title note)
+               (JNOTE-_marked note) (JNOTE-_readall note) (JNOTE-_tags note) (JNOTE-order note)
+               (JNOTE-id note)
+               (JNOTE-parent_id note) (joplin--folder-title (JNOTE-parent_id note))
+               (JNOTE-created_time note)
+               (JNOTE-updated_time note)))))
+
+
+(defun joplin--short-id (id)
+  (and id (substring id 0 7)))
+
+(defmacro joplin--folder-title (id)
+  `(let ((f (cdr (assoc ,id joplin-folders))))
+     (if f
+         (JFOLDER-title f))))
+
+(defun joplin-search-marked-count ()
+  (with-current-buffer (get-buffer "*JoplinSearch*")
+    (let ((count 0))
+      (joplin--search-do-marked
+       (lambda (n)
+         (setq count (1+ count))
+         nil))
+      count)))
+
+(defun joplin-search-flaged-count ()
+  (with-current-buffer (get-buffer "*JoplinSearch*")
+    (let ((count 0))
+      (joplin--search-do-marked
+       (lambda (n)
+         (setq count (1+ count))
+         nil)
+       "D")
+      count)))
+
+(defun joplin--search-update-joplin-notes (updated)
+  "Update `joplin-notes' with updated elements in UPDATED.
+
+UPDATED is a list of JNOTE struct, and the order of elements in
+UPDATED should be identical to that of `joplin-notes'.  Missing
+elements are okay.
+
+Note that this function will destructively rebuild `joplin-notes'."
+  (let ((lst (cons nil joplin-notes)) hdr src n)
+    (setq hdr lst)
+    (setq n (pop updated))
+    (while (setq src (cadr lst))
+      (when (string-equal (JNOTE-id src) (JNOTE-id n))
+        (setcdr lst (cons n (cddr lst)))
+        (setq n (pop updated)))
+      (setq lst (cdr lst))
+      (if (null n)
+          (setq lst nil)))
+    (setq joplin-notes (cdr hdr))))
+
+
+(defmacro joplin--search-sort (arg cmp slot)
+  `(let ((n (joplin--search-note-from-overlay))
+        id)
+    (if n (setq id (JNOTE-id n)))
+
+    (setq joplin-notes
+          (sort joplin-notes (lambda (a b)
+                               (funcall ,cmp
+                                        (funcall ,slot a)
+                                        (funcall ,slot b)))))
+
+    (if ,arg
+        (setq joplin-notes (nreverse joplin-notes)))
+
+    (joplin--search-rerender)
+    (and id
+         (joplin-search-goto-note id))))
+
+(defun joplin-search-sort-notes-by-id (&optional arg)
+  (interactive "P")
+  (joplin--search-sort arg #'string-lessp #'JNOTE-id))
+
+(defun joplin-search-sort-notes-by-title (&optional arg)
+  (interactive "P")
+  (joplin--search-sort arg
+                       (lambda (a b)
+                         (< (compare-strings a nil nil b nil nil t) 0))
+                       #'JNOTE-title))
+
+(defun joplin-search-sort-notes-by-updated_time (&optional arg)
+  (interactive "P")
+  (joplin--search-sort arg #'< #'JNOTE-updated_time))
+
+(defun joplin-search-sort-notes-by-created_time (&optional arg)
+  (interactive "P")
+  (joplin--search-sort arg #'< #'JNOTE-updated_time))
+
+(defun joplin-search-sort-notes-by-order (&optional arg)
+  (interactive "P")
+  (joplin--search-sort arg #'> #'JNOTE-order))
+
+(defun joplin-search-delete-notes ()
+  (interactive)
+  (let ((count 0)
+        (total (joplin-search-flaged-count)))
+    (if (= total 0)
+        (message "No note flagged for deletion")
+      (joplin--search-do-marked (lambda (n)
+                                  (message "delete note(s) %d/%d..."
+                                           (setq count (1+ count)) total)
+                                  (joplin--delete-note (JNOTE-id n))
+                                  t)
+                                "D")
+      (message "%d note(s) moved" count))))
+
+(defun joplin-search-move-notes (folder-id)
+  (interactive (list (joplin--completing-folder-name
+                      "Select destination folder: ")))
+
+  (let ((count 0)
+        (total (joplin-search-marked-count))
+        moved)
+    (cl-flet ((mov (n)
+                   (let (note)
+                     (setq note (joplin--move-note (JNOTE-id n) folder-id))
+                     (message "move note(s) %d/%d..."
+                              (setq count (1+ count))
+                              total)
+                     (joplin--render-note note 'update)
+                     (push note moved)
+                     nil)))
+      (if (> total 0)
+          (joplin--search-do-marked #'mov)
+        (let ((inhibit-read-only t))
+          (mov (joplin--search-note-from-overlay)))))
+
+    (joplin--search-update-joplin-notes (nreverse moved))
+    (message "%d note(s) moved" count)))
+
+(defun joplin-search-goto-note (id)
+  (let ((cont t) found)
+    (widen)
+    (push-mark)
+    (goto-char (point-min))
+    (while cont
+      (let ((n (joplin--search-note-from-overlay))
+            nid)
+        (if n (setq nid (JNOTE-id n)))
+        (if (string-equal id nid)
+            (setq cont nil
+                  found t)
+          (setq cont (= (forward-line 1) 0)))))
+    (if found
+        (joplin-search-point-to-title)
+      (goto-char (mark))
+      (pop-mark))))
 
 
 

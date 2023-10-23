@@ -19,6 +19,15 @@ Add this line on your init file:
     (with-eval-after-load "markdown-mode"
       (add-to-list 'markdown-mode-hook 'joplin-note-mode))
 
+Or, you couse use following `use-package` macro:
+
+    (use-package joplin-mode
+      :load-path (expand-file-name "*JOPLIN-MODE-PACKAGE-DIRECTORY*")
+      :requires markdown-mode
+      :config
+      (add-to-list 'markdown-mode-hook 'joplin-note-mode))
+
+
 In Joplin application, goto [Options]->[Web Clipper], and make sure you
 enabled the clipper service.
 
@@ -44,6 +53,15 @@ Next, you'll need to run proxy server on Windows.  The easiet one is to install 
 Then, using the Windows IP address and the proxy port, construct the proxy endpoint in your Emacs init file (`$HOME/.emacs` or `$HOME/.emacs.d/init.el`):
 
     (setq joplin-curl-args '("--proxy" "http://172.22.144.1:8080"))
+
+For `use-package`, you could add above line in the `:config` part:
+
+    (use-package joplin-mode
+      ...
+      :config
+      (setq joplin-curl-args '("--proxy" "http://172.22.144.1:8080")
+      ...)
+
 
 Make sure that you enabled Web Clipper service in Joplin.  To test it, from your WSL terminal, do this:
 

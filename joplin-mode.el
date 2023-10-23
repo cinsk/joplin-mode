@@ -42,6 +42,18 @@
 ;; \\[joplin-save-note],
 ;; \\[joplin-jump-to-folder]
 
+;;
+;; Buffer local variables
+;;
+;;
+;; --Joplin Note Buffer--
+;; a note buffer retrived from JoplinApp alreadys has joplin-note
+;; defined, but several functions need to work on vanilla markdown
+;; buffer, which does not have any joplin-related buffer local
+;; variables.
+;;
+;;  - joplin-note: a JNOTE struct
+;;  - joplin-resources: list of JRES struct
 
 (defface joplin-note-id-face
   '((t :inherit shadow))
@@ -220,8 +232,9 @@ The buffer contains local variable 'joplin-note, pointing the JNOTE struct of th
            (markdown-mode))
       (insert body)
       (goto-char (point-min))
-      (setq-local joplin-note note)
       (joplin-note-mode)
+      (setq-local joplin-note note)
+      (joplin--buffer-resources)
       ;;(message "note: %s" note)
       (set-buffer-modified-p nil)
 
@@ -1696,6 +1709,43 @@ Note that this function will destructively rebuild `joplin-notes'."
       (pop-mark))))
 
 
+(defun joplin--buffer-resources (&optional buffer)
+  "Return the list of resources (JRES struct) of the note buffer.
+
+If the buffer local variable, `joplin-resources' is defined, this
+function simply returns it.  Otherwise, it will retrieve resources
+from JoplinApp."
+  (or buffer
+      (setq buffer (current-buffer)))
+  (with-current-buffer buffer
+    (if (local-variable-p 'joplin-resources)
+        joplin-resources
+
+      (when (local-variable-p 'joplin-note)
+        (let ((iter (joplin--note-resources (JNOTE-id joplin-note)))
+              resmap)
+          ;; Read from JoplinApp for all resources belongs to this note
+          (while iter
+            (condition-case x
+                (let ((res (iter-next iter)))
+                  (if res
+                      (push (cons (JRES-id res) res) resmap)))
+              (iter-end-of-sequence (setq iter nil))))
+          ;; Scan the buffer to mark the embedded resources
+          (save-excursion
+            (save-restriction
+              ;; TODO: save-match-data?
+              (widen)
+              (goto-char (point-min))
+              (while (re-search-forward
+                      "!\\[\\([^]]*\\)\\](\\(:/\\([^)]*\\)\\))" nil t)
+                (let* ((kv (assoc (match-string-no-properties 3) resmap))
+                       (r (cdr kv)))
+                  (if r
+                      (setf (JRES-_embeded r) t))))))
+
+          (setq-local joplin-resources
+                      (mapcan (lambda (kv) (list (cdr kv))) resmap)))))))
 
 (provide 'joplin-mode)
 

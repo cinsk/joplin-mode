@@ -104,6 +104,7 @@ If COMPLETE is boolean to mark JNOTE has all members"
       note)))
 
 (cl-defstruct JRES
+  _embeded
   id
   title
   mime

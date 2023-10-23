@@ -31,6 +31,7 @@
 
 (require 'joplin-http)
 (require 'joplin-struct)
+(require 'generator)
 
 (iter-defun joplin--search-notes-by-text (text)
   (let ((context (copy-alist
@@ -54,6 +55,24 @@
 
         (dolist (n notes)
           (iter-yield n))))))
+
+(iter-defun joplin--note-resources (id)
+  ;; TODO: I'm not sure whether this is the right approach.
+  ;; If we just care about the embedded images, it's better to get the
+  ;; id of the resources from the note buffer, as the API /notes/ID/resources
+  ;; is not able to tell whether the resources is for an embedded image.
+  (let ((context (copy-alist
+                  `((page . 0)
+                    (limit . 10)
+                    (fields . "id,title,updated_time,file_extension,size"))))
+        (items [])
+        (resp '((items . []) (has_more . t))))
+    (while (not (eq (alist-get 'has_more resp) :json-false))
+      (cl-incf (alist-get 'page context))
+      (setq resp (joplin--http-get (format "/notes/%s/resources" id) context))
+      (let ((items (alist-get 'items resp)))
+        (dotimes (i (length items))
+          (iter-yield (build-JRES (aref items i))))))))
 
 (provide 'joplin-gen)
 ;;; joplin-gen.el ends here

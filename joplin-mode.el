@@ -1454,9 +1454,8 @@ Similar to \\[previous-line], tuned to JoplinSearch buffer"
       (joplin--search-mark-line nil))))
 
 (defun joplin--search-delete-line ()
-  ; not sure to use `delete-line'.
-  (delete-region (line-beginning-position) (line-beginning-position 2))
-  )
+  ;; `delete-line' is not available in Emacs 27.1
+  (delete-region (line-beginning-position) (line-beginning-position 2)))
 
 (defun joplin--search-mark-line (markchar &optional note)
   "Mark the note in the current line with MARKCHAR.
@@ -1513,7 +1512,7 @@ The ordering in SET should be identical to that of OBJS.  For example,
                 (joplin--error 'debug "run PROC (note:%s)" (JNOTE-id note))
                 (setq lst (cons note lst))
                 (if (setq rem (funcall func note))
-                    (delete-line))
+                    (joplin--search-delete-line))
                 ))))
         (if rem
             (setq rem nil)
@@ -1664,7 +1663,7 @@ Note that this function will destructively rebuild `joplin-notes'."
                                   (joplin--delete-note (JNOTE-id n))
                                   t)
                                 "D")
-      (message "%d note(s) moved" count))))
+      (message "%d note(s) deleted" count))))
 
 (defun joplin-search-move-notes (folder-id)
   (interactive (list (joplin--completing-folder-name
@@ -1746,6 +1745,18 @@ from JoplinApp."
 
           (setq-local joplin-resources
                       (mapcan (lambda (kv) (list (cdr kv))) resmap)))))))
+
+(defun joplin--register-resources (filename &optional title)
+  "Register new resource from FILENAME with optional TITLE.
+
+Returns new JRES struct of the resource."
+  (unless (file-readable-p filename)
+    (error "joplin: cannot read file %s" filename))
+  (or title
+      (setq title ""))
+  (let ((resp (joplin--http-post-attachment-url (list (cons 'title title))
+                                                filename)))
+    (build-JRES resp t)))
 
 (provide 'joplin-mode)
 

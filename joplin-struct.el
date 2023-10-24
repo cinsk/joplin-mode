@@ -105,6 +105,7 @@ If COMPLETE is boolean to mark JNOTE has all members"
 
 (cl-defstruct JRES
   _embeded
+  _readall
   id
   title
   mime
@@ -126,22 +127,24 @@ If COMPLETE is boolean to mark JNOTE has all members"
 (defun build-JRES (src &optional complete)
   "return new JRES struct from the alist, SRC"
   (let-alist src
-    (make-JRES :id .id
-               :title .title
-               :mime .mime
-               :created_time .created_time
-               :updated_time .updated_time
-               :user_created_time .user_created_time
-               :user_updated_time .user_updated_time
-               :file_extension .file_extension
-               :encryption_cipher_text .encryption_cipher_text
-               :encryption_applied .encryption_applied
-               :encryption_blob_encrypted .encryption_blob_encrypted
-               :size .size
-               :is_shared .is_shared
-               :share_id .share_id
-               :master_key_id .master_key_id
-               :user_data .user_data)))
+    (let ((res (make-JRES :id .id
+                          :title .title
+                          :mime .mime
+                          :created_time .created_time
+                          :updated_time .updated_time
+                          :user_created_time .user_created_time
+                          :user_updated_time .user_updated_time
+                          :file_extension .file_extension
+                          :encryption_cipher_text .encryption_cipher_text
+                          :encryption_applied .encryption_applied
+                          :encryption_blob_encrypted .encryption_blob_encrypted
+                          :size .size
+                          :is_shared .is_shared
+                          :share_id .share_id
+                          :master_key_id .master_key_id
+                          :user_data .user_data)))
+      (setf (JRES-_readall res) complete)
+      res)))
 
 
 (provide 'joplin-struct)

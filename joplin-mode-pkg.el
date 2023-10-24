@@ -1,6 +1,5 @@
 (define-package "joplin-mode" "20231008.2023" "Joplin mode"
-  '((emacs "27.1")
-    (plz "0.7"))
+  '((emacs "27.1"))
 
   :maintainers
   '(("Seong-Kook Shin" . "cinsky@gmail.com"))

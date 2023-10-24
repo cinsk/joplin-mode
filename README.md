@@ -4,8 +4,6 @@ Emacs client for accessing Joplin note
 ## Requirements
 
 - [markdown-mode](https://github.com/jrblevin/markdown-mode)
-- [plz](https://github.com/alphapapa/plz.el)
-  - *plz* requires `curl(1)` on your system
 
 ## Installation
 
@@ -35,9 +33,6 @@ enabled the clipper service.
 It should work.
 
 ### Windows
-The `curl(1)` shipped with Windows does not support `--compressed` option which plz 0.7 expected at the moment.  To use it, either you need to install new `curl(1)` or remove `--compressed` option from *plz*.  For the latter, you can add folowing lisp code in your Emacs init file:
-
-    (setq plz-curl-default-args (delete "--compressed" plz-curl-default-args)
     
 ### Windows /w Emacs on WSL
 
@@ -52,14 +47,14 @@ Next, you'll need to run proxy server on Windows.  The easiet one is to install 
 
 Then, using the Windows IP address and the proxy port, construct the proxy endpoint in your Emacs init file (`$HOME/.emacs` or `$HOME/.emacs.d/init.el`):
 
-    (setq joplin-curl-args '("--proxy" "http://172.22.144.1:8080"))
+    (setq joplin-url-proxy '(("http" . "172.22.144.1:8080")))
 
 For `use-package`, you could add above line in the `:config` part:
 
     (use-package joplin-mode
       ...
       :config
-      (setq joplin-curl-args '("--proxy" "http://172.22.144.1:8080")
+      (setq joplin-url-proxy '(("http" . "172.22.144.1:8080")))
       ...)
 
 

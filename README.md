@@ -1,5 +1,5 @@
 # joplin-mode
-Emacs client for accessing Joplin note
+an Emacs client for accessing [Joplin](https://joplinapp.org/) notes.
 
 ## Requirements
 
@@ -26,17 +26,17 @@ Or, you couse use following `use-package` macro:
       (add-to-list 'markdown-mode-hook 'joplin-note-mode))
 
 
-In Joplin application, goto [Options]->[Web Clipper], and make sure you
-enabled the clipper service.
+In JoplinApp, goto [Options]->[Web Clipper], and make sure you enabled the clipper service.
 
 ### Linux or Mac
 It should work.
 
 ### Windows
-    
+Not tested.
+
 ### Windows /w Emacs on WSL
 
-This section assumes that you have WSL2 (Widnows subsystem for Linux) and did not change the network configuration of it.   Since, your Linux box is placed on a private network range, and JoplinApp only listen to 127.0.0.0 network, you cannot connect Joplin from your Linux box.  However, if you deploy proxy server on Windows, and let `joplin-mode` to connect to the proxy first, then you can use it.
+This section assumes that you have WSL2 (Widnows subsystem for Linux) and did not change the network configuration of it.   Since, your Linux box is placed on a private network range, and JoplinApp only listen to 127.0.0.0 network, you cannot connect Joplin from your Linux box.  However, if you deploy proxy server on Windows, and let *joplin-mode* to connect to the proxy first, then you can use it.
 
 First, check the IP address of the Windows from WSL.  Open the file `/etc/resolv.conf` and you can get the Windows IP address from the `nameserver` field.  (See [Accessing network applications with WSL](https://learn.microsoft.com/en-us/windows/wsl/networking) for more details.
 
@@ -58,7 +58,7 @@ For `use-package`, you could add above line in the `:config` part:
       ...)
 
 
-Make sure that you enabled Web Clipper service in Joplin.  To test it, from your WSL terminal, do this:
+Make sure that you enabled Web Clipper service in JoplinApp.  To test it, from your WSL terminal, do this:
 
     $ curl -s --proxy http://172.22.144.1:8080 http://127.0.0.1:81184/
     JoplinClipperServer
@@ -67,15 +67,12 @@ If you get the string "JoplinClipperServer", congratulation!  Now you can access
     
 ## Usage
 
-If you use `joplin-mode` first time, it will ask your permission to
-get API token.  Make sure you allow it in Joplin application, then in
-Emacs, press `Return` (or `Enter`) key.
+If you use *joplin-mode* first time, it will ask your permission to get API token.  Make sure you allow it in Joplin application, then in Emacs, press `Return` (or `Enter`) key.
 
 
 ### `joplin-mode`: Joplin Notebook buffer 
 
 `M-x joplin` will list up all of your notebooks.  Unfortunately, there is nothing much you can do at the moment.
-
 
 - `C-n` or `n`: move to the next folder
 - `C-p` or `p`: move to the previous folder 
@@ -86,7 +83,7 @@ Emacs, press `Return` (or `Enter`) key.
 `M-x joplin-search` will accept query string, and list the notes that match.
 
 - `s` or `/`: new search
-- `g`: revert (call Joplin again with the same search query)
+- `g`: revert (call JoplinApp again with the same search query)
 - `C-n` or `n`: move to the next note
 - `C-p` or `p`: move to the previous note
 - `t i`: toggle id field on the buffer
@@ -125,10 +122,28 @@ You can sort the list of notes in the search buffer:
 
 There are two types of note buffer in `joplin-mode`:
 
-- If you visit Joplin note from the search buffer, `joplin-mode` will create a buffer for the note.  This note does not have any association with the local file system, and any usual saving action will update the note in Joplin app.
+- If you visit Joplin note from the search buffer, *joplin-mode* will create a buffer for the note.  Any usual saving action such as `C-x C-s` will update the note in JoplinApp.
 
 - You can enable the minor mode `joplin-note-mode` on any emacs buffer.  The installation section already provided the init code so that any `markdown-mode` buffer will automatically enable `joplin-note-mode`. 
-  - If you press `C-c j s`, `joplin-note-mode` will save the note to whatever associated file in your local file system, then upload the note to the Joplin, and de-associated the buffer with whatever file in your local file system.  Any subsequent saving action will update the note in Jolin app.
+  - If you press `C-c j s`, `joplin-note-mode` will save the note to whatever associated file in your local file system first.
   - You'll need to provide the note title and notebook name.
+  - If the markdown has a link to a file or an image link, and the file is accessible from the local file system, *joplin-mode* will upload the file to JoplinApp, and convert the link target to a Joplin resource. 
+  - Then it will upload the note text to the JoplinApp, and de-associated the buffer with whatever file in your local file system.
+  - Any subsequent modification in the buffer will be updated in JoplinApp not the original file.
  
+Common key bindings:
+  - `C-c j s`: save the buffer to JoplinApp
+  - `C-c j l`: upload the file as a Joplin resource in the link at the point, convert the link target.  You don't need to use this as `C-c j s` will upload all local links.
 
+## Known problems / Help wanted
+
+Here are current backlogs that I need to do.  Any help will be greatly appreciated.
+
+  - The order of search results are not the same as JoplinApp.  I have not figured out how to sort the response from JoplinApp.  If somebody is able to demonstrate the search query request using `curl(1)`, and how to sort the output to match with JoplinApp...
+  - Some help on how to register *joplin-mode* to [Melpa](https://melpa.org/).
+  - Joplin Notebook mode.
+  - keyword completion on search; autocompleting Joplin search operators such as "any:", "title:", "body:", etc.  I do not want to rely on external packages such as [helm](https://github.com/emacs-helm/helm), but want to implement with vanilla Emacs features.
+  - In the current implementation, all Joplin note buffer are bound to a single temporary file.   This is necessary to override Emacs's default saving action to upload to JoplinApp.  Ideally, Joplin note buffer should not be bound to any local temporary files. 
+  - Clean up the source code, and possibly optimize it.
+  
+  

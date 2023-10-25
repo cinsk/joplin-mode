@@ -142,7 +142,7 @@ will be appended to the variable, `user-emacs-directory'.")
         (url-request-method "PUT")
         (url-request-extra-headers
          '(("Content-Type" . "application/x-www-form-urlencoded")))
-        (url-request-data (json-serialize args)))
+        (url-request-data (encode-coding-string (json-serialize args) 'utf-8)))
     (with-temp-buffer
       (url-insert-file-contents
        (joplin--build-url url (append context joplin-context)))

@@ -54,6 +54,15 @@
 ;;
 ;;  - joplin-note: a JNOTE struct
 ;;  - joplin-resources: list of JRES struct
+;;  - joplin-resources-files: alist of (title-pathname . JRES)
+;;
+;;    title-pathname is (concat title
+;;                              (char-to-string ?\u0000)
+;;                              absolute-pathname).
+;;
+;;  Even if markdown link target shares the same pathname, if the
+;;  title of the link is different, then joplin-mode treat them as
+;;  different resources not as a same resource.
 
 (defface joplin-note-id-face
   '((t :inherit shadow))
@@ -77,6 +86,16 @@
   :group 'joplin-faces)
 
 
+(defvar joplin-note)
+(defvar joplin-temp-file)
+(defvar joplin-source-file)
+(defvar joplin-visible-fields)
+(defvar joplin-eob-marker)
+(defvar joplin-search-iter)
+(defvar joplin-search-limit)
+(defvar joplin-search-count)
+(defvar joplin-search-text)
+
 ;;
 ;; Internal gloval variable.  Not expected to be overriden by users.
 ;;
@@ -99,21 +118,26 @@ is a list of JFOLDER struct.
 An empty string is used for the root folder id.")
 
 
-(defvar joplin-temp-note-file (make-temp-file "joplin"))
+(defvar joplin-temp-note-file
+  (let ((tmpfile (make-temp-file "joplin")))
+    (add-to-list 'kill-emacs-hook 'joplin--cleanup)
+    tmpfile))
+
+(defun joplin--cleanup ()
+  (delete-file joplin-temp-note-file))
 
 (defun joplin--get-api-token ()
   "Get Joplin API token from JoplinApp"
   (condition-case e
-      (progn
-        (let ((auth (alist-get 'auth_token (joplin--http-post "/auth" nil)))
-              token)
-          (while (not token)
-            (read-from-minibuffer
-             "Switch to Joplin App, then accept authorization request [RET]: ")
-            (setq token (alist-get 'token
-                                   (joplin--http-get "/auth/check"
-                                                     `((auth_token . ,auth))))))
-          token))
+      (let ((auth (alist-get 'auth_token (joplin--http-post "/auth" nil)))
+            token)
+        (while (not token)
+          (read-from-minibuffer
+           "Switch to Joplin App, then accept authorization request [RET]: ")
+          (setq token (alist-get 'token
+                                 (joplin--http-get "/auth/check"
+                                                   `((auth_token . ,auth))))))
+        token)
     (error (joplin--error 'error "%s" e)
            ;; (signal (car e) (cdr e))  ; to re-rasise
            nil)))
@@ -240,6 +264,7 @@ The buffer contains local variable 'joplin-note, pointing the JNOTE struct of th
 
       (setq-local buffer-file-name joplin-temp-note-file
                   joplin-temp-file t
+                  buffer-stale-function (lambda (&optional noconfirm) nil)
                   write-file-functions '(joplin-save-note)))
     (current-buffer)))
 
@@ -444,30 +469,6 @@ It will move the point to the corresponding folder"
          (setq ,var (cons (cons (eval (pop ,lst)) (eval (pop ,lst))) ,var)))
        ,var)))
 
-(defun joplin--get-api-token ()
-  (condition-case e
-      (let ((auth (cdr (assoc 'auth_token (joplin--http-post "/auth" nil))))
-            token)
-        (while (not token)
-          (read-from-minibuffer
-           "Switch to Joplin App, then accept authorization request [RET]: ")
-          (setq token (alist-get 'token
-                                 (joplin--http-get "/auth/check"
-                                                   `((auth_token . ,auth))))))
-        token)
-    (error (joplin--error 'error "%s" e)
-           ;; (signal (car e) (cdr e))
-           nil
-           )))
-
-(defun joplin--save-token (token)
-  (let ((path (concat (file-name-as-directory user-emacs-directory)
-                      joplin-token-file)))
-    (with-temp-buffer
-      (insert token)
-      (with-file-modes #o600
-        (write-region (point-min) (point-max) path)))))
-
 ;;;###autoload
 (defun joplin (&optional arg)
   (interactive "p")
@@ -560,14 +561,44 @@ It will move the point to the corresponding folder"
       (message "node posted - %s" noteid)
       noteid)))
 
-
+;; Why bother to bound the note buffer's file name to the temporary
+;; file name?
+;;
+;; I want to override the default behavior of save-buffer for joplin
+;; note buffer so that I just use default emacs save action to update
+;; the buffer contents in JoplinApp.
+;;
+;; I was able to do that by installing my own function in the local
+;; variable, `write-file-functions', but it only works when the
+;; `buffer-file-name' is actually bound to a file.  Otherwise, it will
+;; ask the user to provide the filename which is not what I want.
+;;
+;; This create multiple problems at the moment.
+;; (1) Emacs still believes that the joplin note buffer is bound to
+;; the original file name, which is not what I want.  Perhaps I should
+;; override `buffer-file-truename' as well?
+;; (2) sometimes, Emacs belives that the temp file was modified so
+;; that asking to revert the buffer, which is not what I want. I was
+;; experiment with `buffer-stale-function' and
+;; `set-visited-file-modtime' and it seems that it resolved.  But I
+;; haven't figured which was actually solving the problem so I left both
+;; of them.
+;; (3) Ideally, once the buffer registered to JoplinApp, it should not
+;; have any relation with any file, but the user can use Emacs default
+;; saving action to update the buffer to Joplin.  I need a help on this.
 (defun joplin-save-note (&optional arg)
   (interactive "p")
   (joplin--init)
-  (if (and (boundp 'joplin-temp-file)
-           joplin-temp-file)
-      nil
+
+  (unless (and (boundp 'joplin-temp-file)
+               joplin-temp-file)
+    ;; This means the buffer was not originally created by
+    ;; joplin-mode.  We do not know whether the user want to keep the
+    ;; file in the file system or not.  So, it's better to save it
+    ;; first, then upload it to JoplinApp.
     (save-buffer))
+
+  (joplin-resource-upload-all)
 
   (if (boundp 'joplin-note)
       (joplin--update-note)
@@ -578,14 +609,18 @@ It will move the point to the corresponding folder"
       (setq-local joplin-source-file buffer-file-name
                   buffer-file-name joplin-temp-note-file
                   joplin-temp-file t
+                  buffer-stale-function (lambda (&optional noconfirm) nil)
                   write-file-functions '(joplin-save-note))
 
       (rename-buffer (joplin--note-buffer-name joplin-note))
+      (set-buffer-modified-p nil)
+      (set-visited-file-modtime)
       (JNOTE-id joplin-note)))
+
   ;; Reminder.  This function should return non-nil as it is part of
   ;; variable `write-file-functions'.  Since `joplin--update-note' and
   ;; `joplin--register-note' both return note id, it should work.
-  )
+  t)
 
 ;;;###autoload
 (define-minor-mode joplin-note-mode
@@ -595,6 +630,8 @@ It will move the point to the corresponding folder"
   '(([(control ?c) ?j ?i] . joplin-show-properties)
     ([(control ?c) ?j ?j] . joplin-jump-to-folder)
     ([(control ?c) ?j ?s] . joplin-save-note)
+    ([(control ?c) ?j ?l] . joplin-resource-upload-at-point)
+    ([(control ?c) ?j ?L] . joplin-resource-upload-all)
     ))
 
 
@@ -683,332 +720,6 @@ It will move the point to the corresponding folder"
         (define-key map [?M] #'joplin-search-move-notes)
         (define-key map [?x] #'joplin-search-delete-notes)
         map))
-
-(defun joplin--note-buffer-name (note)
-  (format "*JoplinNote:%s*" (JNOTE-id note)))
-
-(defun joplin-search-visit-note (&optional arg)
-  (interactive)
-  ;; (joplin-note-buffer "id")
-  (let* ((note (joplin--search-note-from-overlay))
-         (bufname (joplin--note-buffer-name note)))
-    (when note
-      (let ((buf (get-buffer bufname)))
-        (if buf
-            (switch-to-buffer buf)
-          (setq buf (get-buffer-create bufname))
-          (joplin-note-buffer (JNOTE-id note) buf)
-          (switch-to-buffer buf)
-          )))))
-
-
-(defun joplin-clear-search (&optional arg)
-  (interactive)
-  (let ((inhibit-read-only t))
-    (erase-buffer)
-    (set-marker joplin-eob-marker (point-min))
-    (setq joplin-notes ()
-          joplin-search-iter nil
-          joplin-search-count 0
-          joplin-search-limit joplin-limit-per-search
-          joplin-search-text "")))
-
-(defun joplin--search-buffer ()
-  "Return Joplin Search buffer, create one if none exists."
-  (if (eq major-mode 'joplin-search-mode)
-      (current-buffer)
-    (let ((buf (get-buffer-create joplin-search-buffer-name)))
-      (with-current-buffer buf
-        (joplin-search-mode)
-        (current-buffer)))))
-
-;;;###autoload
-(defun joplin-search (&optional prefix text)
-  (interactive "p\nssearch: ")
-
-  (joplin--init)
-  (let ((buf (joplin--search-buffer)))
-    (when (> (length text) 0)
-      (let ((iter (joplin--search-notes-by-text text)))
-
-        (with-current-buffer buf
-          (joplin-clear-search)
-          (setq joplin-search-iter iter
-                joplin-search-text text)
-          (joplin--search-load)
-          (goto-char (point-min))
-          (joplin-search-point-to-title))))
-    (pop-to-buffer buf)))
-
-(defun joplin-search-revert (&optional arg)
-  "Replace current search buffer text with JoplinApp search result."
-  (interactive "p")
-
-  (let (noteid)
-    (let ((note (joplin--search-note-from-overlay)))
-      (when note
-        (setq noteid (JNOTE-id note))))
-
-    (when (> (length joplin-search-text) 0)
-      (let ((iter (joplin--search-notes-by-text joplin-search-text)))
-        (setq joplin-notes ()
-              joplin-search-iter iter
-              joplin-search-count 0))
-
-      (let ((inhibit-read-only t))
-        (erase-buffer)
-        (set-marker joplin-eob-marker (point-min)))
-
-      (joplin--search-load))
-
-    (let ((pos (joplin--search-note-position noteid)))
-      (when pos
-        (goto-char pos)))))
-
-(defun joplin--render-note (note)
-  (let (text items)
-    (set-marker joplin-eob-marker (point))
-
-    (let ((m (JNOTE-_marked note)))
-      (setq items (cons (format "%1s" (or m "")) items)))
-
-    (when (alist-get 'id joplin-visible-fields)
-      (let ((jid (JNOTE-id note))
-            short ps)
-        (setq short (format "%-7s" (if (> (length jid) 7)
-                                       (substring jid 0 7)
-                                     ""))
-              ps (propertize short
-                             'face 'joplin-note-id-face
-                             'jfield 'id)
-              items (cons ps items))))
-
-    (when (alist-get 'created_time joplin-visible-fields)
-      (let ((tm (JNOTE-created_time note))
-            tmstr ps)
-        (setq tmstr (format "%-14s" (if tm
-                                        (joplin--time-string-short tm) ""))
-              ps (propertize tmstr
-                             'face 'joplin-note-created-time-face
-                             'jfield 'created_time)
-              items (cons ps items))))
-
-    (when (alist-get 'updated_time joplin-visible-fields)
-      (let ((tm (JNOTE-updated_time note))
-            tmstr ps)
-        (setq tmstr (format "%-14s" (if tm
-                                        (joplin--time-string-short tm) ""))
-              ps (propertize tmstr
-                             'face 'joplin-note-updated-time-face
-                             'jfield 'updated_time)
-              items (cons ps items))))
-
-    (setq text (string-join (nreverse items) " "))
-    (insert (format "%s  %s\n" text
-                    (propertize (JNOTE-title note)
-                                'face 'joplin-note-title-face
-                                'jfield 'title
-                                'jnote note
-                                )
-                    ))
-    (let ((ol (make-overlay joplin-eob-marker (point))))
-      (overlay-put ol 'joplin-note note))
-    (set-marker joplin-eob-marker (point))))
-
-
-;; TODO: enable third-party minor modes may add additional overlay to
-;; the buffer.  Should handle properly
-(defun joplin--search-note-from-overlay ()
-  (let (note)
-    (cl-loop for o in (overlays-at (point))
-             when (setq note (overlay-get o 'joplin-note)) return note)))
-
-(defun joplin--search-note-overlay ()
-  (let (ol)
-    (cl-loop for o in (overlays-at (point))
-             when (setq ol (when (overlay-get o 'joplin-note) o)) return ol)))
-
-
-(defun joplin--search-next-note-pos (pos)
-  (if (get-text-property pos 'jnote)
-      pos
-    (next-single-property-change pos 'jnote)))
-
-
-(defun joplin--search-note-position (id &optional startpos)
-  "buffer position of the note title matched with ID starting from STARTPOS"
-  (let ((pos (or startpos (point-min))) done jnote)
-    (while (and (not done)
-                (setq pos (joplin--search-next-note-pos pos)))
-      (setq jnote (get-text-property pos 'jnote))
-      (if (string-equal (JNOTE-id jnote) id)
-          (setq done t)
-        (setq pos (next-single-property-change pos 'jnote))))
-    pos))
-
-(defun joplin-search-toggle-id ()
-  (interactive)
-  (let ((val (alist-get 'id joplin-visible-fields)) noteid)
-    (setf (alist-get 'id joplin-visible-fields) (not val))
-
-    (let ((note (joplin--search-note-from-overlay)))
-      (when note
-        (setq noteid (JNOTE-id note))))
-
-    (joplin--search-rerender)
-
-    (let ((pos (joplin--search-note-position noteid)))
-      (when pos
-        (goto-char pos)))))
-
-(defun joplin-search-toggle-created-time ()
-  (interactive)
-  (let ((val (alist-get 'created_time joplin-visible-fields)) noteid)
-    (setf (alist-get 'created_time joplin-visible-fields) (not val))
-
-    (let ((note (joplin--search-note-from-overlay)))
-      (when note
-        (setq noteid (JNOTE-id note))))
-
-    (joplin--search-rerender)
-
-    (let ((pos (joplin--search-note-position noteid)))
-      (when pos
-        (goto-char pos)))))
-
-(defun joplin-search-toggle-updated-time ()
-  (interactive)
-  (let ((val (alist-get 'updated_time joplin-visible-fields)) noteid)
-    (setf (alist-get 'updated_time joplin-visible-fields) (not val))
-
-    (let ((note (joplin--search-note-from-overlay)))
-      (when note
-        (setq noteid (JNOTE-id note))))
-
-    (joplin--search-rerender)
-
-    (let ((pos (joplin--search-note-position noteid)))
-      (when pos
-        (goto-char pos)))))
-
-(defun joplin--search-rerender ()
-  ;; render the buffer using `joplin-notes' list
-  (let ((inhibit-read-only t))
-    (erase-buffer)
-    (set-marker joplin-eob-marker (point-min))
-
-    (save-restriction
-      (widen)
-      (goto-char (point-max))
-      (cl-dolist (note joplin-notes)
-        ;; render
-        (joplin--render-note note)))))
-
-(defun joplin--search-load ()
-  ;; render the buffer & fill buffer local data
-  (let ((inhibit-read-only t)
-        note)
-    (when joplin-search-iter
-      (if (>= joplin-search-count joplin-search-limit)
-          (setq joplin-search-limit
-                (+ joplin-search-limit joplin-limit-per-search)))
-      (save-restriction
-        (widen)
-        (goto-char (point-max))
-        (let (l)
-          (condition-case x
-              (while (< joplin-search-count joplin-search-limit)
-                (setq note (iter-next joplin-search-iter))
-                (setq l (cons note l))
-
-                ;; render
-                (joplin--render-note note)
-
-                (setq joplin-search-count (1+ joplin-search-count)))
-            (iter-end-of-sequence
-             (setq joplin-search-iter nil)))
-
-          (setq joplin-notes (append joplin-notes (nreverse l)))
-          ))
-      (message "%d notes found(s). %s" joplin-search-count
-               (if joplin-search-iter "--more" "")))))
-
-
-;; (defun joplin--search-norm-point (&optional arg)
-(defun joplin-search-point-to-title (&optional arg)
-  "Move the point to the beginning of the note title"
-  ;; Assumes that note title does not starts at the beginning of the line
-  (let ((bol (line-beginning-position))
-        (eol (line-end-position))
-        pos)
-    ;; TODO: use text-property-search-forward?
-    ;; NO I don't think so, it looks bulkier than next-single-property-change
-    (if (get-text-property bol 'jnote)
-        (goto-char bol)
-      (setq pos (next-single-property-change bol 'jnote nil eol))
-      (if pos
-          (goto-char pos)))))
-
-(defun joplin-search-next-line (arg &optional interactive)
-  "Move cursor vertically down ARG lines.
-
-Similar to \\[next-line], tuned to JoplinSearch buffer"
-  (interactive (list (prefix-numeric-value current-prefix-arg) t))
-  (or arg (setq arg 1))
-
-  (when interactive
-    ;; check if there's more note to load
-    ;; TODO: async processing would be nice
-    (when (and joplin-search-iter
-               ;; below may not correct if narrow-to-region is in effect.
-               (pos-visible-in-window-p (point-max)))
-      (save-excursion
-        (joplin--search-load))))
-
-  (let ((ret (forward-line arg)))
-    (joplin-search-point-to-title)
-    ret))
-
-(defun joplin-search-previous-line (&optional arg)
-  "Move cursor vertically up ARG lines.
-
-Similar to \\[previous-line], tuned to JoplinSearch buffer"
-  (interactive "p")
-  (or arg (setq arg 1))
-  (forward-line (- arg))
-  (joplin-search-point-to-title))
-
-(defun joplin-search-debug (&optional arg)
-  (interactive)
-  (message "limit(%d) count(%d/%d) iter(%s)"
-           joplin-limit-per-search
-           joplin-search-count
-           joplin-search-limit
-           (if joplin-search-iter "t" "nil")))
-
-;; (defun joplin-search-mark (arg &optional interactive)
-;;   (interactive (list current-prefix-arg t))
-;;   (cond ((and interactive (use-region-p))
-;;          (save-excursion
-;;            (let ((beg (region-beginning))
-;;                  (end (region-end)))
-;;              (joplin-search-mark-notes-in-region
-;;               (progn (goto-char beg) (line-beginning-position))
-;;               (progn (goto-char end) (line-beginning-position))))))
-;;         (t
-;;          (let ((inhibit-read-only t))
-;;            (joplin-repeat-over-lines
-;;             (prefix-numeric-value arg)
-;;             (lambda () (delete-char 1) (insert dired-marked-char)))))))
-
-
-
-;;(add-hook 'markdown-mode-hook 'joplin-note-mode)
-
-;;(defun joplin-resource-post (file)
-;;  (when (file-readable-p file)
-
-;; (defun joplin-search-repeat-over-notes (lines function)
 
 
 (defun joplin--note-buffer-name (note)
@@ -1157,6 +868,11 @@ Similar to \\[previous-line], tuned to JoplinSearch buffer"
   (let (note)
     (cl-loop for o in (overlays-at (point))
              when (setq note (overlay-get o 'joplin-note)) return note)))
+
+(defun joplin--search-note-overlay ()
+  (let (ol)
+    (cl-loop for o in (overlays-at (point))
+             when (setq ol (when (overlay-get o 'joplin-note) o)) return ol)))
 
 
 (defun joplin--search-next-note-pos (pos)
@@ -1649,7 +1365,26 @@ Note that this function will destructively rebuild `joplin-notes'."
 
 (defun joplin-search-sort-notes-by-order (&optional arg)
   (interactive "P")
-  (joplin--search-sort arg #'> #'JNOTE-order))
+  ;; (joplin--search-sort arg #'> #'JNOTE-order)
+  (let ((n (joplin--search-note-from-overlay))
+        id)
+    (if n (setq id (JNOTE-id n)))
+
+    (setq joplin-notes
+          (sort joplin-notes (lambda (a b)
+                               (let ((ret (- (JNOTE-order a) (JNOTE-order b))))
+                                 (if (= ret 0)
+                                     (> (JNOTE-updated_time a)
+                                        (JNOTE-updated_time b))
+                                   (> ret 0))))))
+
+    (if arg
+        (setq joplin-notes (nreverse joplin-notes)))
+
+    (joplin--search-rerender)
+    (and id
+         (joplin-search-goto-note id))
+    ))
 
 (defun joplin-search-delete-notes ()
   (interactive)
@@ -1757,6 +1492,113 @@ Returns new JRES struct of the resource."
   (let ((resp (joplin--http-post-attachment-url (list (cons 'title title))
                                                 filename)))
     (build-JRES resp t)))
+
+(defconst joplin--markdown-regex-link-inline
+  ;; Stealed from markdown-mode. Joplin may need to work without
+  ;; markdown-mode so I had to steal it.
+  "\\(?1:!\\)?\\(?2:\\[\\)\\(?3:\\^?\\(?:\\\\\\]\\|[^]]\\)*\\|\\)\\(?4:\\]\\)\\(?5:(\\)\\s-*\\(?6:[^)]*?\\)\\(?:\\s-+\\(?7:\"[^\"]*\"\\)\\)?\\s-*\\(?8:)\\)"
+  "Regular expression for a [text](file) or an image link ![text](file).
+Group 1 matches the leading exclamation point (optional).
+Group 2 matches the opening square bracket.
+Group 3 matches the text inside the square brackets.
+Group 4 matches the closing square bracket.
+Group 5 matches the opening parenthesis.
+Group 6 matches the URL.
+Group 7 matches the title (optional).
+Group 8 matches the closing parenthesis.")
+
+(defun joplin--markdown-link-at-point ()
+  "Return pos if the point is on a markdown link text, otherwise nil.
+
+You can use match data if this function returns non-nil.  This function
+will clobber the match data."
+  (save-excursion
+    (let ((old (point)) pos)
+      (beginning-of-line)
+      (cl-loop while (setq pos
+                           (re-search-forward joplin--markdown-regex-link-inline (line-end-position) t))
+               if (and (<= (match-beginning 0) old)
+                       (<= old (match-end 0))) return pos))))
+
+
+(defun joplin--note-do-resource (file &optional title)
+  (save-match-data
+    (or title (setq title ""))
+    (unless (local-variable-p 'joplin-resources)
+      (setq-local joplin-resources nil))
+    (unless (local-variable-p 'joplin-resources-files)
+      (setq-local joplin-resources-files nil))
+
+    (let ((res-key (concat title (char-to-string ?\u0000)
+                           (file-truename file))))
+      (setq res (alist-get res-key joplin-resources-files nil nil #'equal))
+      (unless res
+        (setq res (joplin--register-resources file title))
+        (joplin--error 'debug "resource registered: %S" res)
+        (when res
+          (push res joplin-resources)
+          (push (cons res-key res) joplin-resources-files)))
+      res)))
+
+
+(defun joplin--local-resource-p (s &optional verbose)
+  "Return t if the link S can be locally accessible.
+
+Precisely, this function returns t if the link is regular file
+pathname which it can access or URL with \"file:\" scheme.
+
+Note that this function preserve match-data if any."
+  (if (or (null s) (string-equal s ""))
+      (and verbose (message "no link at point") nil)
+    (save-match-data
+      (if (string-match "^:/[0-9a-fA-F]+" s)
+          (and verbose (message "skip Joplin link") nil)
+        (let ((u (url-generic-parse-url s)))
+          (if (or (null (url-type u)) (string-equal (url-type u) "file"))
+              (let ((f (url-filename u)))
+                (if (file-readable-p f)
+                    t
+                  (and verbose (message "link access denied") nil)))
+            (and verbose (message "non-local link ignored") nil)))))))
+
+(defun joplin-resource-upload-at-point (&optional arg)
+  "Replace the markdown link target to JoplinApp target.
+
+This may upload the link target as a resource to JoplinApp.
+It returns the JRES struct for the resources."
+  (interactive "p")
+  (joplin--init)
+  (save-excursion
+    (let ((pos (joplin--markdown-link-at-point)) file title)
+      (if pos (setq file (string-trim (match-string-no-properties 6))))
+      (when (joplin--local-resource-p file 'verbose)
+        (setq title (or (match-string-no-properties 7) ""))
+        (let ((res (joplin--note-do-resource file title)))
+          (replace-match (concat "\\1\\2\\3\\4\\5"
+                                 (format ":/%s" (JRES-id res))
+                                 (if (> (length title) 0)
+                                     " " "")
+                                 "\\7\\8")))))))
+
+(defun joplin-resource-upload-all (&optional arg)
+  (interactive "p")
+  (joplin--init)
+  (save-excursion
+    (save-restriction
+      (let (file title)
+        (widen)
+        (goto-char (point-min))
+        (while (re-search-forward joplin--markdown-regex-link-inline nil t)
+          (setq file (string-trim (match-string-no-properties 6))
+                title (or (match-string-no-properties 7) ""))
+          (when (joplin--local-resource-p file)
+            (let ((res (joplin--note-do-resource file title)))
+              (replace-match (concat "\\1\\2\\3\\4\\5"
+                                     (format ":/%s" (JRES-id res))
+                                     (if (> (length title) 0)
+                                         " " "")
+                                     "\\7\\8")))))))))
+
 
 (provide 'joplin-mode)
 

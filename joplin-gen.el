@@ -37,6 +37,7 @@
   (let ((context (copy-alist
                   `((page . 0)
                     (limit . 10)
+                    (order_by . "order")
                     (fields . "id,parent_id,title,created_time,updated_time,is_conflict,latitude,longitude,altitude,author,source_url,is_todo,todo_due,todo_completed,source,source_application,application_data,order,user_updated_time,user_created_time,encryption_cipher_text,encryption_applied,markup_language,is_shared,share_id,conflict_original_id,master_key_id,user_data,source")
                     (type . note)
                     (query . ,(url-hexify-string text))
@@ -51,7 +52,7 @@
         (dotimes (i (length items))
           (push (build-JNOTE (aref items i)) notes))
 
-        (setq notes (sort notes (lambda (a b) (> (JNOTE-order a) (JNOTE-order b)))))
+        ;;(setq notes (sort notes (lambda (a b) (> (JNOTE-order a) (JNOTE-order b)))))
 
         (dolist (n notes)
           (iter-yield n))))))

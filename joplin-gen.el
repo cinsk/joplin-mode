@@ -38,6 +38,7 @@
                   `((page . 0)
                     (limit . 10)
                     (order_by . "order")
+                    (order_dir . "desc")
                     (fields . "id,parent_id,title,created_time,updated_time,is_conflict,latitude,longitude,altitude,author,source_url,is_todo,todo_due,todo_completed,source,source_application,application_data,order,user_updated_time,user_created_time,encryption_cipher_text,encryption_applied,markup_language,is_shared,share_id,conflict_original_id,master_key_id,user_data,source")
                     (type . note)
                     (query . ,(url-hexify-string text))
@@ -52,6 +53,32 @@
         (dotimes (i (length items))
           (push (build-JNOTE (aref items i)) notes))
 
+        (setq notes (nreverse notes))
+        ;;(setq notes (sort notes (lambda (a b) (> (JNOTE-order a) (JNOTE-order b)))))
+
+        (dolist (n notes)
+          (iter-yield n))))))
+
+(iter-defun joplin--folder-notes (fid)
+  (let ((context (copy-alist
+                  `((page . 0)
+                    (limit . 10)
+                    (order_by . "user_updated_time")
+                    (order_dir . "desc")
+                    (fields . "id,parent_id,title,created_time,updated_time,is_conflict,latitude,longitude,altitude,author,source_url,is_todo,todo_due,todo_completed,source,source_application,application_data,order,user_updated_time,user_created_time,encryption_cipher_text,encryption_applied,markup_language,is_shared,share_id,conflict_original_id,master_key_id,user_data,source")
+                    (type . note)
+                    )))
+        (items [])
+        (resp '((items . []) (has_more . t))))
+    (while (not (eq (alist-get 'has_more resp) :json-false))
+      (cl-incf (alist-get 'page context))
+      (setq resp (joplin--http-get (concat "/folders/" fid "/notes") context))
+      (let ((items (alist-get 'items resp))
+            notes)
+        (dotimes (i (length items))
+          (push (build-JNOTE (aref items i)) notes))
+
+        (setq notes (nreverse notes))
         ;;(setq notes (sort notes (lambda (a b) (> (JNOTE-order a) (JNOTE-order b)))))
 
         (dolist (n notes)
@@ -65,7 +92,7 @@
   (let ((context (copy-alist
                   `((page . 0)
                     (limit . 10)
-                    (fields . "id,title,updated_time,file_extension,size"))))
+                    (fields . "id,title,mime,updated_time,filename,file_extension,size"))))
         (items [])
         (resp '((items . []) (has_more . t))))
     (while (not (eq (alist-get 'has_more resp) :json-false))

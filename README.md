@@ -70,12 +70,13 @@ If you get the string "JoplinClipperServer", congratulation!  Now you can access
 If you use *joplin-mode* first time, it will ask your permission to get API token.  Make sure you allow it in Joplin application, then in Emacs, press `Return` (or `Enter`) key.
 
 
-### `joplin-mode`: Joplin Notebook buffer 
+### `joplin-mode`: Joplin buffer (list of notebooks)
 
-`M-x joplin` will list up all of your notebooks.  Unfortunately, there is nothing much you can do at the moment.
+`M-x joplin` will list up all of your notebooks.
 
 - `C-n` or `n`: move to the next folder
 - `C-p` or `p`: move to the previous folder 
+- `RET`: visit notebook buffer
 - `s`: search note (or `M-x joplin-search`)
 
 ### `joplin-search-mode`: Joplin Note Search buffer
@@ -89,7 +90,7 @@ If you use *joplin-mode* first time, it will ask your permission to get API toke
 - `t i`: toggle id field on the buffer
 - `t c`: toggle created time of the note in the buffer
 - `t u`: toggle updated time of the note in the buffer
-- `^`, `C-c C-j` or `C-c j j`: jump to folder buffer
+- `^`, `C-c C-j` or `C-c j j`: jump to Joplin buffer
 - `RET`: visit the note
 - `o`: visit the note in other window
 
@@ -117,6 +118,8 @@ You can sort the list of notes in the search buffer:
 - `S u`: sort by updated time of the note
 - `S c`: sort by created time of the note
 
+### Joplin Notebook buffer
+When you visit notebook buffer from joplin buffer (by `RET`), you'll see the list of notes similar to Joplin Note Search buffer. 
 
 ### `joplin-note-mode`: Joplin Note buffer
 
@@ -134,14 +137,15 @@ There are two types of note buffer in `joplin-mode`:
 Common key bindings:
   - `C-c j s`: save the buffer to JoplinApp
   - `C-c j l`: upload the file as a Joplin resource in the link at the point, convert the link target.  You don't need to use this as `C-c j s` will upload all local links.
-
+  - `C-c j j`: jump to the parent buffer
+  - `C-c j r`: list all resources belongs to this note
+  
 ## Known problems / Help wanted
 
 Here are current backlogs that I need to do.  Any help will be greatly appreciated.
 
   - The order of search results are not the same as JoplinApp.  I have not figured out how to sort the response from JoplinApp.  If somebody is able to demonstrate the search query request using `curl(1)`, and how to sort the output to match with JoplinApp...
   - Some help on how to register *joplin-mode* to [Melpa](https://melpa.org/).
-  - Joplin Notebook mode.
   - keyword completion on search; autocompleting Joplin search operators such as "any:", "title:", "body:", etc.  I do not want to rely on external packages such as [helm](https://github.com/emacs-helm/helm), but want to implement with vanilla Emacs features.
   - In the current implementation, all Joplin note buffer are bound to a single temporary file.   This is necessary to override Emacs's default saving action to upload to JoplinApp.  Ideally, Joplin note buffer should not be bound to any local temporary files. 
   - Clean up the source code, and possibly optimize it.

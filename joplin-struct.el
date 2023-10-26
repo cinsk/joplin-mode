@@ -134,6 +134,7 @@ If COMPLETE is boolean to mark JNOTE has all members"
                           :updated_time .updated_time
                           :user_created_time .user_created_time
                           :user_updated_time .user_updated_time
+                          :filename .filename
                           :file_extension .file_extension
                           :encryption_cipher_text .encryption_cipher_text
                           :encryption_applied .encryption_applied

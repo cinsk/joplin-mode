@@ -1,9 +1,9 @@
 ;;; joplin-mode.el --- Joplin interface
 
-;; Copyright (C) 2005  Seong-Kook Shin <cinsky@gmail.com>
+;; Copyright (C) 2023  Seong-Kook Shin <cinsky@gmail.com>
 
 ;; Author: Seong-Kook Shin <cinsky@gmail.com>
-;; Keywords: convenience, data, tools
+;; Keywords: extensions, tools
 
 ;; This program is free software; you can redistribute it and/or modify
 ;; it under the terms of the GNU General Public License as published by
@@ -40,11 +40,20 @@
 ;; joplin-note-buffer.
 
 ;;
-;; Buffer local variables
+;; * Buffer local variables
 ;;
+;; *** Joplin Buffer
+;; *** Joplin Search Buffer
+;; - joplin-notes
+;; - joplin-visible-fields
+;; - joplin-search-limit
+;; - joplin-search-done
+;; - joplin-search-func
+;; - joplin-search-args
+;; - joplin-search-type: either \\='search or \\='folder
 ;;
-;; --Joplin Note Buffer--
-;; a note buffer retrived from JoplinApp alreadys has joplin-note
+;; *** Joplin Note Buffer
+;; A note buffer retrived from JoplinApp alreadys has joplin-note
 ;; defined, but several functions need to work on vanilla markdown
 ;; buffer, which does not have any joplin-related buffer local
 ;; variables.
@@ -57,10 +66,14 @@
 ;;                              (char-to-string ?\u0000)
 ;;                              absolute-pathname).
 ;;
-;;  Even if markdown link target shares the same pathname, if the
-;;  title of the link is different, then joplin-mode treat them as
-;;  different resources not as a same resource.
-
+;;    Even if markdown link target shares the same pathname, if the
+;;    title of the link is different, then joplin-mode treat them as
+;;    different resources not as a same resource.
+;;  - joplin-parent-buffer: parent buffer
+;;    This indicates where the user came to the note buffer.  Currently,
+;;    either Joplin notebook buffer or Joplin search buffer.  Used by
+;;    `joplin-jump-to-parent'.
+;;
 (defface joplin-folder-id-face
   '((t :inherit shadow))
   "Face for Joplin folder id"
@@ -89,6 +102,15 @@
 (defface joplin-note-mark-face
   '((t :inherit dired-mark))
   "Face for Joplin Note mark"
+  :group 'joplin-faces)
+
+(defface joplin-properties-name-face
+  '((t :inherit shadow))
+  "Face for Joplin property name"
+  :group 'joplin-faces)
+(defface joplin-properties-value-face
+  '((t :inherit font-lock-string-face))
+  "Face for Joplin property value"
   :group 'joplin-faces)
 
 (defvar joplin-no-unicode-symbol nil)
@@ -176,10 +198,10 @@ An empty string is used for the root folder id.")
         (items [])
         (resp '((items . []) (has_more . t))))
     (while (not (eq (alist-get 'has_more resp) :json-false))
-      (setcdr (assoc 'page context) (1+ (cdr (assoc 'page context))))
+      (setf (alist-get 'page context) (1+ (alist-get 'page context)))
       ;; (setq resp (plz 'get (joplin-build-url "/folders" context) :as #'json-read))
       (setq resp (joplin--http-get "/folders" context))
-      (setq items (vconcat items (cdr (assoc 'items resp)))))
+      (setq items (vconcat items (alist-get 'items resp))))
     items))
 
 
@@ -195,8 +217,7 @@ from `joplin--load-folders'."
                                  :parent_id (alist-get 'parent_id item)
                                  :title (alist-get 'title item))
                    ))
-          (setq idmap (cons (cons (alist-get 'id item) fdr)
-                            idmap)))))
+          (push (cons (alist-get 'id item) fdr) idmap))))
     idmap))
 
 (defun joplin--build-pcmap (folders idmap)
@@ -244,14 +265,16 @@ from `joplin--load-folders'."
       (joplin--walk-folders proc (JFOLDER-id c) (1+ level)))))
 
 (defun joplin--dump-folders (&optional parent level)
-  (joplin--walk-folders (lambda (folder lev)
-                          (joplin--error 'debug "visit: %s%s" (make-string (* lev 2) ?\ )
-                                         (JFOLDER-title folder)))))
+  (joplin--walk-folders
+   (lambda (folder lev)
+     (joplin--error 'debug "visit: %s%s" (make-string (* lev 2) ?\ )
+                    (JFOLDER-title folder)))))
 
 (defvar joplin-error-buffer (get-buffer-create "*joplin-debug*"))
 
 
 (defun joplin--get-note (id)
+  "Return JNOTE struct by fetching note with ID from JoplinApp."
   (let ((info-ctx (list '(fields . "id,parent_id,title,created_time,updated_time,is_conflict,latitude,longitude,altitude,author,source_url,is_todo,todo_due,todo_completed,source,source_application,application_data,order,user_updated_time,user_created_time,encryption_cipher_text,encryption_applied,markup_language,is_shared,share_id,conflict_original_id,master_key_id,user_data,source")))
         src note)
     (setq src (joplin--http-get (concat "/notes/" id) info-ctx))
@@ -259,18 +282,41 @@ from `joplin--load-folders'."
       (setf (JNOTE-_readall n) t)
       n)))
 
-(defun joplin-note-buffer (id &optional buffer parent-buffer)
-  "Return the Joplin note buffer.
+(defun joplin--note-buffer (id &optional parent buf-name)
+  "Return Joplin Note buffer.
 
-The buffer contains local variable 'joplin-note, pointing the JNOTE struct of the buffer"
+Argument ID is Joplin Note id.  PARENT is the parent buffer for
+jump parent action (usually a buffer of `joplin-search' or the
+function `joplin-folder', and override the name of the buffer to
+BUF-NAME if non-nil."
+  (or buf-name
+      (setq buf-name (joplin--note-buffer-name id)))
+
+  (let ((buf (get-buffer buf-name)))
+    (unless (and buf (buffer-live-p buf))
+      (setq buf (joplin--note-fill-buffer id
+                                          (get-buffer-create buf-name)
+                                          parent)))
+    (with-current-buffer buf
+      (setq-local joplin-parent-buffer parent))
+    buf))
+
+(defun joplin--note-fill-buffer (id buffer &optional parent-buffer)
+  "Fill the contents of the Joplin note buffer.
+
+If the corresponding note buffer (with the note ID) is already
+exists, this function simply update it's parent buffer to
+PARENT-BUFFER, then return.
+
+Otherwise, it retrieves the note contents from JoplinApp, and
+update the parent buffer to PARENT-BUFFER, then return."
   (let ((note (joplin--get-note id))
         (body-ctx (list '(fields . "body")))
         src body)
-    (setq buffer (or buffer (format "%s.md" id)))
     (setq src (joplin--http-get (concat "/notes/" id) body-ctx))
-    (setq body (cdr (assoc 'body src)))
+    (setq body (alist-get 'body src))
 
-    (with-current-buffer (get-buffer-create buffer)
+    (with-current-buffer buffer
       (erase-buffer)
       (and (fboundp 'markdown-mode)
            (markdown-mode))
@@ -286,11 +332,13 @@ The buffer contains local variable 'joplin-note, pointing the JNOTE struct of th
                   joplin-parent-buffer parent-buffer
                   joplin-temp-file t
                   buffer-stale-function (lambda (&optional noconfirm) nil)
-                  write-file-functions '(joplin-save-note)))
-    (current-buffer)))
+                  write-file-functions '(joplin-save-note))
+      buffer)))
 
 (defun joplin--completing-folder-name (prompt)
-  "Read a user selected folder name in the minibuffer, return the folder ID or nil"
+  "Read a Joplin folder name in the minibuffer with PROMPT.
+
+This function returns the folder id in string, or nil."
   (let (sel resp)
     (cl-dolist (f joplin-folders)
       (let ((folder (cdr f)))
@@ -331,19 +379,46 @@ The buffer contains local variable 'joplin-note, pointing the JNOTE struct of th
 (defun joplin--time-string-short (time)
   (format-time-string "%m/%d/%yT%H:%M" (1+ (/ time 1000))))
 
+(define-derived-mode joplin-properties-mode tabulated-list-mode "Joplin Properties" "Major mode for listing Joplin properties"
+  (setq tabulated-list-format [("name" 24 t . (:right-align t))
+                               ("value" 55 nil)])
+  )
 
-(defun joplin-show-properties ()
-  (interactive)
-  (joplin--init)
-  (if (not (boundp 'joplin-note))
-      (message "Note information not found")
-    (let ((folder (joplin--folder)))
-      (message (format "Folder: %s\nTitle: %s\nUpdated: %s\nCreated: %s\nId: %s"
-                       (JFOLDER-title folder)
-                       (JNOTE-title joplin-note)
-                       (joplin--time-string (JNOTE-updated_time joplin-note))
-                       (joplin--time-string (JNOTE-created_time joplin-note))
-                       (JNOTE-id joplin-note))))))
+(defun joplin--show-properties (val)
+  (with-current-buffer-window "*JoplinProperties*"
+      '(display-buffer--maybe-at-bottom (dedicate . t))
+      #'(lambda (w _v)
+          (with-selected-window w
+            (unwind-protect
+                (progn
+                  (read-string "Press <RET> to continue: "))
+              (when (window-live-p w)
+                (quit-restore-window w 'kill)))))
+    (joplin-properties-mode)
+    (joplin--properties-refresh val)
+    (tabulated-list-print)))
+
+(defun joplin--properties-refresh (struct)
+  (let ((type (type-of struct))
+        lst)
+    (setq tabulated-list-entries
+          (mapcan
+           (lambda (a)
+             (let (val)
+             (condition-case e
+                 (cl-destructuring-bind (slot opts) a
+                   (list
+                    (list nil
+                          (vector
+                           (propertize (symbol-name slot)
+                                       'face 'joplin-properties-name-face)
+                           (propertize (format "%S" (cl-struct-slot-value type slot struct))
+                                       'face 'joplin-properties-value-face)
+
+                           ))))
+               (wrong-number-of-arguments nil))))
+           (cdr (cl-struct-slot-info type))))
+    (tabulated-list-init-header)))
 
 ;;;###autoload
 (define-derived-mode joplin-mode special-mode "Joplin" "docstring..."
@@ -355,7 +430,7 @@ The buffer contains local variable 'joplin-note, pointing the JNOTE struct of th
         (define-key map [(control ?p)] #'joplin-previous-folder)
         (define-key map [(?n)] #'joplin-next-folder)
         (define-key map [(?p)] #'joplin-previous-folder)
-        (define-key map [(?i)] #'joplin-show-folder-properties)
+        (define-key map [(?i)] #'joplin-show-properties)
         (define-key map [(?g)] #'joplin-sync-folders)
         (define-key map [(?\r)] #'joplin-visit-folder)
         (define-key map [(?s)] #'joplin-search)
@@ -391,7 +466,7 @@ The buffer contains local variable 'joplin-note, pointing the JNOTE struct of th
         (goto-char pos))))
 
 
-(defun joplin--switch-or-pop-to-buffer (buffer &optional switch)
+(defun joplin-switch-or-pop-to-buffer (buffer &optional switch)
   "If SWITCH is non-nil, `switch-to-buffer'. Otherwise `pop-to-buffer'."
   (if switch
       (switch-to-buffer buf)
@@ -399,6 +474,22 @@ The buffer contains local variable 'joplin-note, pointing the JNOTE struct of th
     (if win
         (select-window win)
       (pop-to-buffer buffer))))
+
+(defun joplin-show-properties (&optional arg)
+  (interactive "P")
+  (let ((v (cond ((eq major-mode 'joplin-mode)
+                  (joplin--folder-at-point))
+                 ((eq major-mode 'joplin-search-mode)
+                  (joplin--search-note-at-point))
+                 ((eq major-mode 'joplin-resources-mode)
+                  (tabulated-list-get-id))
+                 ((and (boundp 'joplin-note-mode) joplin-note-mode)
+                  (and (boundp 'joplin-note)
+                       joplin-note))
+                 (t nil))))
+    (when v
+      (joplin--show-properties v))))
+
 
 (defun joplin-jump-to-parent (&optional arg)
   (interactive "P")
@@ -408,7 +499,7 @@ The buffer contains local variable 'joplin-note, pointing the JNOTE struct of th
                (buf (joplin--buffer))
                fid win)
            (and note (setq fid (JNOTE-parent_id note)))
-           (joplin--switch-or-pop-to-buffer buf arg)
+           (joplin-switch-or-pop-to-buffer buf arg)
            (if fid
                (with-current-buffer buf
                  (joplin-move-point-to-folder fid)))))
@@ -422,7 +513,7 @@ The buffer contains local variable 'joplin-note, pointing the JNOTE struct of th
            (if (and (boundp 'joplin-parent-buffer)
                     (buffer-live-p joplin-parent-buffer))
                (let ((parent joplin-parent-buffer))
-                 (joplin--switch-or-pop-to-buffer parent arg)
+                 (joplin-switch-or-pop-to-buffer parent arg)
                  (if nid
                      (with-current-buffer parent
                        (joplin-search-move-point-to-note nid))))
@@ -444,14 +535,6 @@ The buffer contains local variable 'joplin-note, pointing the JNOTE struct of th
   (or arg (setq arg 1))
   (forward-line (- arg))
   (joplin-point-at-folder))
-
-(defun joplin-show-folder-properties ()
-  (interactive)
-  (let ((folder (joplin--folder-at-point)))
-    (if folder
-        ;; TODO: display more information?
-        (message "%s: %s" (JFOLDER-id folder) (JFOLDER-title folder))
-      (message "no folder found in the current position"))))
 
 (defun joplin--buffer ()
   "Return the buffer of top-level joplin buffer.  If not, create it."
@@ -773,7 +856,7 @@ The buffer contains local variable 'joplin-note, pointing the JNOTE struct of th
         ;;(define-key map [?o] #'joplin-search-visit-note-other-window)
         (define-key map [?\r] #'joplin-search-visit-note)
 
-        (define-key map [?i] #'joplin-search-note-info)
+        (define-key map [?i] #'joplin-show-properties)
 
         (define-key map [?m] #'joplin-search-mark)
         (define-key map [?u] #'joplin-search-unmark)
@@ -793,24 +876,24 @@ The buffer contains local variable 'joplin-note, pointing the JNOTE struct of th
 
 
 (defun joplin--note-buffer-name (note)
-  (format "*JoplinNote:%s*" (JNOTE-id note)))
+  "Return Joplin Note buffer name.
+
+Argument NOTE is a JNOTE struct or note id in string."
+  (format "*JoplinNote:%s*" (if (JNOTE-p note) (JNOTE-id note) note)))
 
 (defun joplin-search-visit-note (&optional arg)
+  "Visit Joplin Note at the point.
+
+With prefix argument ARG non-nil, switch to note buffer with `switch-to-buffer'.
+Otherwise, it will try to pop up the buffer in other window.
+See `joplin-switch-or-pop-to-buffer' for more details."
   (interactive "P")
-  ;; (joplin-note-buffer "id")
   (let* ((note (joplin--search-note-at-point))
-         (bufname (joplin--note-buffer-name note))
-         (parent (current-buffer)))
+         (parent (current-buffer))
+         note-buf)
     (when note
-      (let ((buf (get-buffer bufname)))
-        (if buf
-            (with-current-buffer buf
-              (setq-local joplin-parent-buffer parent))
-          (setq buf (get-buffer-create bufname))
-          (joplin-note-buffer (JNOTE-id note) buf parent))
-        (if arg
-            (pop-to-buffer buf)
-          (switch-to-buffer buf))))))
+      (setq note-buf (joplin--note-buffer (JNOTE-id note) parent))
+      (joplin-switch-or-pop-to-buffer note-buf arg))))
 
 (defun joplin-search-visit-note-other-window (&optional arg)
   (interactive "P")
@@ -890,7 +973,7 @@ The buffer contains local variable 'joplin-note, pointing the JNOTE struct of th
           (joplin--search-load)
           (goto-char (point-min))
           (joplin-search-point-to-title))))
-    (joplin--switch-or-pop-to-buffer buf switch)))
+    (joplin-switch-or-pop-to-buffer buf switch)))
 
 (defun joplin-search-revert (&optional arg)
   "Replace current search buffer text with JoplinApp search result."
@@ -1395,22 +1478,6 @@ The ordering in SET should be identical to that of OBJS.  For example,
 (defun joplin--delete-note (note-id)
   (joplin--http-del (concat "/notes/" note-id)))
 
-
-(defun joplin-search-note-info ()
-  (interactive)
-  (let ((note (joplin--search-note-at-point)))
-    (when note
-      (message "%s\n_mark [%s], _readall[%s], _tags[%s], order[%s]
-id: %s\nparent_id: %s [%s]
-created_time: %s\nupdated_time: %s"
-               (JNOTE-title note)
-               (JNOTE-_marked note) (JNOTE-_readall note) (JNOTE-_tags note) (JNOTE-order note)
-               (JNOTE-id note)
-               (JNOTE-parent_id note) (joplin--folder-title (JNOTE-parent_id note))
-               (JNOTE-created_time note)
-               (JNOTE-updated_time note)))))
-
-
 (defun joplin--short-id (id)
   (and id (substring id 0 7)))
 
@@ -1420,23 +1487,21 @@ created_time: %s\nupdated_time: %s"
          (JFOLDER-title f))))
 
 (defun joplin-search-marked-count ()
-  (with-current-buffer (get-buffer "*JoplinSearch*")
-    (let ((count 0))
-      (joplin--search-do-marked
-       (lambda (n)
-         (setq count (1+ count))
-         nil))
-      count)))
+  (let ((count 0))
+    (joplin--search-do-marked
+     (lambda (n)
+       (setq count (1+ count))
+       nil))
+    count))
 
 (defun joplin-search-flaged-count ()
-  (with-current-buffer (get-buffer "*JoplinSearch*")
-    (let ((count 0))
-      (joplin--search-do-marked
-       (lambda (n)
-         (setq count (1+ count))
-         nil)
-       "D")
-      count)))
+  (let ((count 0))
+    (joplin--search-do-marked
+     (lambda (n)
+       (setq count (1+ count))
+       nil)
+     "D")
+    count))
 
 (defun joplin--search-update-joplin-notes (updated)
   "Update `joplin-notes' with updated elements in UPDATED.
@@ -1754,8 +1819,15 @@ It returns the JRES struct for the resources."
 
   (let ((keymap joplin-resources-mode-map))
     (define-key keymap [(control ?c) (control ?j)] #'joplin--jump-to-note-buffer)
-    (define-key keymap [(control ?c) ?j] #'joplin--jump-to-note-buffer))
+    (define-key keymap [(control ?c) ?j] #'joplin--jump-to-note-buffer)
+    (define-key keymap [?q] #'joplin-resources-window-quit)
+    (define-key keymap [?i] #'joplin-show-properties)
+    )
   )
+
+(defun joplin-resources-window-quit (&optional arg)
+  (interactive "P")
+  (quit-window (not arg)))
 
 (defun joplin--note-list-res-size-p (e1 e2)
   (let ((r1 (car e1))

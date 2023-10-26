@@ -27,7 +27,9 @@
 
 ;; To keep it simple, I prefer to have code that rely on 'plz in this file.
 
-(require 'plz)
+(when (locate-library "plz")
+  (require 'plz))
+
 (require 'joplin-http-post-simple)
 
 (defvar joplin-token-file ".joplin.token"

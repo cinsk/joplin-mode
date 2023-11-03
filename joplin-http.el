@@ -82,13 +82,14 @@ will be appended to the variable, `user-emacs-directory'.")
 (defun joplin--build-url (&optional path ctx)
   (let (qslst url)
     (dolist (p ctx)
+      ;; TODO: for a key/value pair in query string,
+      ;;       should I call `joplin--http-post-encode-string'?
       (setq qslst (cons (format "%s=%s" (car p) (cdr p)) qslst)))
     (let ((qs (mapconcat 'identity qslst "&")))
       (setq url (concat joplin-endpoint (or path "")
                         (if (string-equal qs "")
                             ""
                           (concat "?" qs))))
-      (joplin--error 'debug "joplin-build-url: %s" url)
       url)))
 
 
@@ -113,6 +114,7 @@ will be appended to the variable, `user-emacs-directory'.")
 (defun joplin--http-get-url (url &optional context)
   (let ((url-proxy-services joplin-url-proxy))
     (with-temp-buffer
+      (joplin--error 'debug "HTTP GET %s" url)
       (url-insert-file-contents
        (joplin--build-url url (append context joplin-context)))
       (json-read))))
@@ -124,17 +126,7 @@ will be appended to the variable, `user-emacs-directory'.")
          '(("Content-Type" . "application/x-www-form-urlencoded")))
         (url-request-data (json-serialize args)))
     (with-temp-buffer
-      (url-insert-file-contents
-       (joplin--build-url url (append context joplin-context)))
-      (json-read))))
-
-(defun joplin--http-put-url (url args &optional context)
-  (let ((url-proxy-services joplin-url-proxy)
-        (url-request-method "PUT")
-        (url-request-extra-headers
-         '(("Content-Type" . "application/x-www-form-urlencoded")))
-        (url-request-data (json-serialize args)))
-    (with-temp-buffer
+      (joplin--error 'debug "HTTP POST %s" url)
       (url-insert-file-contents
        (joplin--build-url url (append context joplin-context)))
       (json-read))))
@@ -146,6 +138,7 @@ will be appended to the variable, `user-emacs-directory'.")
          '(("Content-Type" . "application/x-www-form-urlencoded")))
         (url-request-data (encode-coding-string (json-serialize args) 'utf-8)))
     (with-temp-buffer
+      (joplin--error 'debug "HTTP PUT %s" url)
       (url-insert-file-contents
        (joplin--build-url url (append context joplin-context)))
       (json-read))))
@@ -154,6 +147,7 @@ will be appended to the variable, `user-emacs-directory'.")
   (let ((url-proxy-services joplin-url-proxy)
         (url-request-method "DELETE"))
     (with-temp-buffer
+      (joplin--error 'debug "HTTP DELETE %s" url)
       (url-insert-file-contents
        (joplin--build-url url (append context joplin-context))))))
 
@@ -161,6 +155,7 @@ will be appended to the variable, `user-emacs-directory'.")
   ;; (joplin--http-post-attachment-url '((title . "my image")) "front.png")
   (let ((url-proxy-services joplin-url-proxy)
         ret)
+    (joplin--error 'debug "HTTP POST MULTIPART %s" url)
     (setq ret (joplin--http-post-simple-multipart
                (joplin--build-url "/resources"
                                   (append context joplin-context))

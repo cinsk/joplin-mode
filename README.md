@@ -139,7 +139,11 @@ Common key bindings:
   - `C-c j l`: upload the file as a Joplin resource in the link at the point, convert the link target.  You don't need to use this as `C-c j s` will upload all local links.
   - `C-c j j`: jump to the parent buffer
   - `C-c j r`: list all resources belongs to this note
+  - `C-c j t`: show tags of the current note
+  - `C-u C-c j t`: edit tags of the current note
   
+If you visit a note from Joplin, not from your local disk, *joplin-mode* will create buffer with `markdown-mode` and `view-mode` enabled, which means the buffer is read-only by default.    You can scroll the buffer with your usuall keybindings in addition to `<RET>`, which also scroll forward.   Pressing `e` will quit the *view-mode* and makes the buffer editable.  Pressing `q` will quit the *view-mode* and delete the buffer.   See also (the view-mode manual)[https://www.gnu.org/software/emacs/manual/html_node/emacs/View-Mode.html].
+
 ## Known problems / Help wanted
 
 Here are current backlogs that I need to do.  Any help will be greatly appreciated.

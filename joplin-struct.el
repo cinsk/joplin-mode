@@ -25,6 +25,8 @@
 ;;; Code:
 
 
+(defvar joplin-error-buffer (get-buffer-create "*joplin-debug*"))
+
 (cl-defstruct JFOLDER
   id title parent_id
   ;; these are not supported yet (Joplin 2.12.18)
@@ -147,6 +149,72 @@ If COMPLETE is boolean to mark JNOTE has all members"
       (setf (JRES-_readall res) complete)
       res)))
 
+(cl-defstruct JTAG
+  id
+  title
+  created_time
+  updated_time
+  user_created_time
+  user_updated_time
+  encryption_cipher_text
+  encryption_applied
+  is_shared
+  parent_id
+  user_data)
+
+(defun build-JTAG (src)
+  "return new JTAG struct from the alist, SRC"
+  (let-alist src
+    (let ((res (make-JTAG :id .id
+                          :title .title
+                          :created_time .created_time
+                          :updated_time .updated_time
+                          :user_created_time .user_created_time
+                          :user_updated_time .user_updated_time
+                          :encryption_cipher_text .encryption_cipher_text
+                          :encryption_applied .encryption_applied
+                          :is_shared .is_shared
+                          :parent_id .parent_id
+                          :user_data .user_data)))
+      res)))
+
+
+(defun joplin--error (level msg &rest args)
+  (let ((m (apply 'format (cons msg args))))
+    (let ((s (format "%s: %s" level m)))
+      (with-current-buffer joplin-error-buffer
+        (save-restriction
+          (goto-char (point-max))
+          (insert s)
+          (newline)))
+      (when (eq level 'error)
+        (error s)))))
+
+(defmacro joplin-with-wait (sec &rest body)
+  (declare (indent 1) (debug t))
+  (let ((t1 (make-symbol "t1"))
+        (delta (make-symbol "delta"))
+        (wait (make-symbol "wait"))
+        (ret (make-symbol "ret")))
+    `(let ((,t1 (current-time))
+           (,wait (time-convert ,sec)))
+       (setq ,ret (progn ,@body)
+             ,delta (time-subtract (current-time) ,t1))
+       (when (time-less-p ,delta ,wait)
+         (setq ,wait (time-subtract ,wait ,delta))
+         (sit-for 0)
+         (sleep-for (nth 1 ,wait)
+                    (1+ (/ (nth 2 ,wait) 1000))))
+       ,ret)))
+
+(defmacro joplin-with-diff-time (&rest body)
+  (declare (indent 0) (debug t))
+  (let ((t1 (make-symbol "t1"))
+        (t2 (make-symbol "t2")))
+    `(let ((,t1 (current-time)) ,t2)
+       ,@body
+       (setq ,t2 (current-time))
+       (time-subtract ,t2 ,t1))))
 
 (provide 'joplin-struct)
 

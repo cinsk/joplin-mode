@@ -28,7 +28,7 @@
 (require 'joplin-struct)
 (require 'joplin-http)
 (require 'joplin-gen)
-
+(require 'joplin-tags)
 
 ;; Entry points
 ;;
@@ -247,6 +247,7 @@ from `joplin--load-folders'."
 
 (defun joplin-sync-folders ()
   (interactive)
+  (joplin--init-folders)
   (joplin--render-joplin-buffer))
 
 (defun joplin--parse-folders (folders)
@@ -270,17 +271,34 @@ from `joplin--load-folders'."
      (joplin--error 'debug "visit: %s%s" (make-string (* lev 2) ?\ )
                     (JFOLDER-title folder)))))
 
-(defvar joplin-error-buffer (get-buffer-create "*joplin-debug*"))
+(defun joplin-get-folder (id)
+  (joplin--init)
+  (alist-get id joplin-folders nil nil #'equal))
 
-
-(defun joplin--get-note (id)
+(defun joplin-get-note (id)
   "Return JNOTE struct by fetching note with ID from JoplinApp."
+  (joplin--init)
   (let ((info-ctx (list '(fields . "id,parent_id,title,created_time,updated_time,is_conflict,latitude,longitude,altitude,author,source_url,is_todo,todo_due,todo_completed,source,source_application,application_data,order,user_updated_time,user_created_time,encryption_cipher_text,encryption_applied,markup_language,is_shared,share_id,conflict_original_id,master_key_id,user_data,source")))
         src note)
     (setq src (joplin--http-get (concat "/notes/" id) info-ctx))
-    (let ((n (build-JNOTE src)))
-      (setf (JNOTE-_readall n) t)
-      n)))
+    (when src
+      (let* ((note (build-JNOTE src))
+             (tags (joplin--note-tags (JNOTE-id note))))
+        (setf (JNOTE-_tags note) tags)
+        (setf (JNOTE-_readall note) t)
+        note))))
+
+(defun joplin--note-tags (id)
+  (let* ((resp (joplin--http-get (concat "/notes/" id "/tags")))
+         (items (alist-get 'items resp))
+         tags)
+    (mapc (lambda (a)
+            (let ((tag (build-JTAG a)))
+              (push tag tags)
+              (puthash (JTAG-title tag) tag joplin-tags)))
+          items)
+    tags))
+
 
 (defun joplin--note-buffer (id &optional parent buf-name)
   "Return Joplin Note buffer.
@@ -310,7 +328,7 @@ PARENT-BUFFER, then return.
 
 Otherwise, it retrieves the note contents from JoplinApp, and
 update the parent buffer to PARENT-BUFFER, then return."
-  (let ((note (joplin--get-note id))
+  (let ((note (joplin-get-note id))
         (body-ctx (list '(fields . "body")))
         src body)
     (setq src (joplin--http-get (concat "/notes/" id) body-ctx))
@@ -323,6 +341,7 @@ update the parent buffer to PARENT-BUFFER, then return."
       (insert body)
       (goto-char (point-min))
       (joplin-note-mode)
+      (view-mode-enter nil #'kill-buffer)
       (setq-local joplin-note note)
       (joplin--buffer-resources)
       ;;(message "note: %s" note)
@@ -349,28 +368,28 @@ This function returns the folder id in string, or nil."
     (and resp
          (cdr (assoc resp sel)))))
 
-
-(defun joplin--error (level msg &rest args)
-  (let ((m (apply 'format (cons msg args))))
-    (let ((s (format "%s: %s" level m)))
-      (with-current-buffer joplin-error-buffer
-        (save-restriction
-          (goto-char (point-max))
-          (insert s)
-          (newline)))
-      (when (eq level 'error)
-        (error s)))))
-
 (defun joplin--folder-id (&optional id)
+  ;; TODO: remove this unused function if confirmed
   (or id
       (if (boundp 'joplin-note)
           (setq id (JNOTE-parent_id joplin-note)))))
 
 (defun joplin--folder (&optional id)
   "Return the folder struct by ID"
+  ;; TODO: remove this unused function if confirmed
   (let ((fid (joplin--folder-id id)))
     (and fid
          (cdr (assoc fid joplin-folders)))))
+
+(defun joplin-emacs-time (tm)
+  "Convert Joplin time JOPLIN-TM to Emacs timestamp.
+
+JOPLIN-TM is a milliseconds. See Info node `(elisp)Time of Day'. "
+  (let ((sec (/ tm 1000))
+        (micro (* (% tm 1000) 1000)))
+    (list (lsh sec -16)
+          (logand sec #xffff)
+          micro 0)))
 
 (defun joplin-emacs-time (tm)
   "Convert Joplin time JOPLIN-TM to Emacs timestamp.
@@ -514,7 +533,7 @@ JOPLIN-TM is a milliseconds. See Info node `(elisp)Time of Day'. "
   (cond ((eq major-mode 'joplin-search-mode)
          ;; goto toplev buffer
          (let ((note (joplin--search-note-at-point))
-               (buf (joplin--buffer))
+               (buf (joplin-buffer))
                fid win)
            (and note (setq fid (JNOTE-parent_id note)))
            (joplin-switch-or-pop-to-buffer buf arg)
@@ -554,7 +573,7 @@ JOPLIN-TM is a milliseconds. See Info node `(elisp)Time of Day'. "
   (forward-line (- arg))
   (joplin-point-at-folder))
 
-(defun joplin--buffer ()
+(defun joplin-buffer ()
   "Return the buffer of top-level joplin buffer.  If not, create it."
   (unless (get-buffer joplin-toplev-buffer-name)
     (joplin--render-joplin-buffer)
@@ -569,7 +588,7 @@ JOPLIN-TM is a milliseconds. See Info node `(elisp)Time of Day'. "
 ;;     :then 'sync)
 ;;   (error e))
 
-(defun joplin-refresh-token ()
+(defun joplin--refresh-token ()
   "Save Joplin api token in a file retrived from JoplinApp."
   (let ((token (joplin--get-api-token)))
     (when token
@@ -579,7 +598,9 @@ JOPLIN-TM is a milliseconds. See Info node `(elisp)Time of Day'. "
   (unless joplin-context
     (joplin--init-context))
   (unless joplin-folders
-    (joplin--init-folders)))
+    (joplin--init-folders))
+  (joplin--tags-init))
+
 
 (defun joplin--init-context ()
   (let ((path (concat (file-name-as-directory user-emacs-directory)
@@ -587,7 +608,7 @@ JOPLIN-TM is a milliseconds. See Info node `(elisp)Time of Day'. "
         token)
     ;; insert-file-contents filename
     (if (not (file-readable-p path))
-        (joplin-refresh-token))
+        (joplin--refresh-token))
 
     (with-temp-buffer
       (insert-file-contents path)
@@ -622,7 +643,7 @@ JOPLIN-TM is a milliseconds. See Info node `(elisp)Time of Day'. "
   (interactive "p")
   ;; TODO: get token, then set `joplin-context'.
   (joplin--init)
-  (switch-to-buffer (joplin--buffer)))
+  (switch-to-buffer (joplin-buffer)))
 
 (defun joplin--render-joplin-buffer ()
   (or joplin-folders
@@ -800,6 +821,7 @@ JOPLIN-TM is a milliseconds. See Info node `(elisp)Time of Day'. "
     ([(control ?c) ?j ?l] . joplin-resource-upload-at-point)
     ([(control ?c) ?j ?L] . joplin-resource-upload-all)
     ([(control ?c) ?j ?r] . joplin-note-list-resources)
+    ([(control ?c) ?j ?t] . joplin-note-do-tags)
     ))
 
 
@@ -956,11 +978,11 @@ See `joplin-switch-or-pop-to-buffer' for more details."
   (joplin--init)
   (let ((buf (joplin--search-buffer)))
     (when (> (length text) 0)
-      (let ((iter (joplin--search-notes-by-text text)))
+      (let ((iter (joplin--gen-search-notes text)))
         (with-current-buffer buf
           (joplin-clear-search)
           (setq joplin-search-iter iter
-                joplin-search-func #'joplin--search-notes-by-text
+                joplin-search-func #'joplin--gen-search-notes
                 joplin-search-args (list text))
           (joplin--search-load)
           (goto-char (point-min))
@@ -983,10 +1005,10 @@ See `joplin-switch-or-pop-to-buffer' for more details."
     (with-current-buffer buf
       (unless (and (boundp 'joplin-search-func) joplin-search-func)
         ;; fill the folder buffer if it looks new and empty.
-        (let ((iter (joplin--folder-notes fid)))
+        (let ((iter (joplin--gen-notes fid)))
           (joplin-clear-search)
           (setq joplin-search-iter iter
-                joplin-search-func #'joplin--folder-notes
+                joplin-search-func #'joplin--gen-notes
                 joplin-search-args (list fid))
           (joplin--search-load)
           (goto-char (point-min))
@@ -1234,7 +1256,6 @@ Similar to \\[next-line], tuned to JoplinSearch buffer"
   (interactive (list (prefix-numeric-value current-prefix-arg) t))
   (or arg (setq arg 1))
 
-  (joplin--error 'debug "(joplin-search-next-line %d)" arg)
   (when interactive
     ;; check if there's more note to load
     ;; TODO: async processing would be nice
@@ -1459,7 +1480,8 @@ The ordering in SET should be identical to that of OBJS.  For example,
           (when note
             (let ((mark (JNOTE-_marked note)))
               (when (and mark (string-equal mark chstr))
-                (joplin--error 'debug "run PROC (note:%s)" (JNOTE-id note))
+                (joplin--error 'debug "search-do-marked on note %s"
+                               (JNOTE-id note))
                 (setq lst (cons note lst))
                 (if (setq rem (funcall func note))
                     (joplin--search-delete-line))
@@ -1493,7 +1515,7 @@ The ordering in SET should be identical to that of OBJS.  For example,
                                 `((parent_id . ,folder-id)))))
     (build-JNOTE resp)))
 
-(defun joplin--delete-note (note-id)
+(defun joplin-delete-note (note-id)
   (joplin--http-del (concat "/notes/" note-id)))
 
 (defun joplin--short-id (id)
@@ -1608,13 +1630,14 @@ Note that this function will destructively rebuild `joplin-notes'."
         (total (joplin-search-flaged-count)))
     (if (= total 0)
         (message "No note flagged for deletion")
-      (joplin--search-do-marked (lambda (n)
-                                  (message "delete note(s) %d/%d..."
-                                           (setq count (1+ count)) total)
-                                  (joplin--delete-note (JNOTE-id n))
-                                  t)
-                                "D")
-      (message "%d note(s) deleted" count))))
+      (when (y-or-n-p (format "Deleting %d note(s).  are you sure?" total))
+        (joplin--search-do-marked (lambda (n)
+                                    (message "delete note(s) %d/%d..."
+                                             (setq count (1+ count)) total)
+                                    (joplin-delete-note (JNOTE-id n))
+                                    t)
+                                  "D")
+        (message "%d note(s) deleted" count)))))
 
 (defun joplin-search-move-notes (folder-id)
   (interactive (list (joplin--completing-folder-name
@@ -1659,6 +1682,12 @@ Note that this function will destructively rebuild `joplin-notes'."
       (pop-mark))))
 
 
+(defun joplin-get-resource (rid)
+  (build-JRES
+   (joplin--http-get (concat "/resources/" rid)
+                     '((fields . "id,title,mime,updated_time,filename,file_extension,size")))))
+
+
 (defun joplin--buffer-resources (&optional buffer)
   "Return the list of resources (JRES struct) of the note buffer.
 
@@ -1672,7 +1701,7 @@ from JoplinApp."
         joplin-resources
 
       (when (local-variable-p 'joplin-note)
-        (let ((iter (joplin--note-resources (JNOTE-id joplin-note)))
+        (let ((iter (joplin--gen-note-resources (JNOTE-id joplin-note)))
               resmap)
           ;; Read from JoplinApp for all resources belongs to this note
           (while iter
@@ -1750,7 +1779,7 @@ will clobber the match data."
       (setq res (alist-get res-key joplin-resources-files nil nil #'equal))
       (unless res
         (setq res (joplin--register-resources file title))
-        (joplin--error 'debug "resource registered: %S" res)
+        (joplin--error 'debug "note-do-resource: add resource: %S" res)
         (when res
           (push res joplin-resources)
           (push (cons res-key res) joplin-resources-files)))
@@ -1899,6 +1928,54 @@ It returns the JRES struct for the resources."
     (unless (eq buf notebuf)
       (if (buffer-live-p notebuf)
           (switch-to-buffer notebuf)))))
+
+(defun joplin--note-tag-names ()
+  (when joplin-note
+    (let ((tags (JNOTE-_tags joplin-note))
+          titles)
+      (mapc (lambda (tag)
+              (push (JTAG-title tag) titles))
+            tags)
+      titles)))
+
+(defun joplin-note-do-tags (&optional arg)
+  "Show (or edit) Joplin tags of the note.
+
+If ARG is nil, show the list of tags of the current note buffer.
+Otherwise, it will set the tags of the current note buffer."
+  (interactive "P")
+  (let ((names (joplin--note-tag-names))
+        dst-tags)
+    (when arg
+      (setq dst-tags (joplin--completing-read-tags "Set tags: " nil
+                                                   (string-join names ",")))
+
+      (joplin--error 'debug "old note tags: %s"
+                     (string-join names ", "))
+      (joplin--error 'debug "new note tags: %s"
+                     (string-join (mapcar (lambda (tag)
+                                            (JTAG-title tag)) dst-tags) ", "))
+      (cl-destructuring-bind (del . add)
+          (joplin--tag-add-del-list (JNOTE-_tags joplin-note) dst-tags)
+
+        ;; I'm not sure what causing conflicting notes, but it seems that
+        ;; if we send update(add/delete) tags too fast, Joplinap creates
+        ;; a lot of conflicting notes.  So I had to slow down sending
+        ;; requests.
+        (dolist (tag add)
+          (joplin--error 'debug "adding tag %s" (JTAG-title tag))
+          (joplin-with-wait 0.010
+            (joplin--note-add-tag joplin-note tag))
+          )
+
+        (dolist (tag del)
+          (joplin--error 'debug "deleting tag %s" (JTAG-title tag))
+          (joplin-with-wait 0.010
+            (joplin--note-delete-tag joplin-note tag)))
+        )
+      (setf (JNOTE-_tags joplin-note) dst-tags))
+    (setq names (joplin--note-tag-names))
+    (message "Tags: %s" (string-join names ", "))))
 
 
 

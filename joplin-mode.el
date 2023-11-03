@@ -372,12 +372,22 @@ This function returns the folder id in string, or nil."
     (and fid
          (cdr (assoc fid joplin-folders)))))
 
+(defun joplin-emacs-time (tm)
+  "Convert Joplin time JOPLIN-TM to Emacs timestamp.
+
+JOPLIN-TM is a milliseconds. See Info node `(elisp)Time of Day'. "
+  (let ((sec (/ tm 1000))
+        (micro (* (% tm 1000) 1000)))
+    (list (lsh sec -16)
+          (logand sec #xffff)
+          micro 0)))
+
 (defun joplin--time-string (time)
   ;; Joplin time is an integer in milliseconds.
-  (format-time-string "%c" (1+ (/ time 1000))))
+  (format-time-string "%c" (joplin-emacs-time time)))
 
 (defun joplin--time-string-short (time)
-  (format-time-string "%m/%d/%yT%H:%M" (1+ (/ time 1000))))
+  (format-time-string "%m/%d/%yT%H:%M" (joplin-emacs-time time)))
 
 (define-derived-mode joplin-properties-mode tabulated-list-mode "Joplin Properties" "Major mode for listing Joplin properties"
   (setq tabulated-list-format [("name" 24 t . (:right-align t))
@@ -407,15 +417,23 @@ This function returns the folder id in string, or nil."
              (let (val)
              (condition-case e
                  (cl-destructuring-bind (slot opts) a
-                   (list
-                    (list nil
-                          (vector
-                           (propertize (symbol-name slot)
-                                       'face 'joplin-properties-name-face)
-                           (propertize (format "%S" (cl-struct-slot-value type slot struct))
-                                       'face 'joplin-properties-value-face)
+                   (let ((name (symbol-name slot))
+                         (val (cl-struct-slot-value type slot struct))
+                         (opt ""))
+                     (if (and (string-match "\\(updated\\|created\\)_time\\'"
+                                            name)
+                              (integerp val))
+                         (setq opt (concat "  ("
+                                           (joplin--time-string val) ")")))
+                     (list
+                      (list nil
+                            (vector
+                             (propertize name
+                                         'face 'joplin-properties-name-face)
+                             (propertize (format "%S%s" val opt)
+                                         'face 'joplin-properties-value-face)
 
-                           ))))
+                             )))))
                (wrong-number-of-arguments nil))))
            (cdr (cl-struct-slot-info type))))
     (tabulated-list-init-header)))

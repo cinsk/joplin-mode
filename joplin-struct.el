@@ -108,6 +108,7 @@ If COMPLETE is boolean to mark JNOTE has all members"
 (cl-defstruct JRES
   _embeded
   _readall
+  _cachedfile
   id
   title
   mime
@@ -215,6 +216,22 @@ If COMPLETE is boolean to mark JNOTE has all members"
        ,@body
        (setq ,t2 (current-time))
        (time-subtract ,t2 ,t1))))
+
+(defun joplin-file-older-than-p (file num &optional unit)
+  (let ((basesec (cond ((eq unit 'days)
+                        (* num 24 60 60))
+                       ((or (null unit) (eq unit hours))
+                        (* num 60 60))
+                       ((eq unit 'seconds)
+                        num)
+                       (t (error "invalid UNIT value"))))
+        (path (expand-file-name file))
+        delta)
+    (setq delta (time-convert (time-subtract (current-time)
+                                             (file-attribute-access-time
+                                              (file-attributes path)))
+                              'integer))
+    (> delta basesec)))
 
 (provide 'joplin-struct)
 

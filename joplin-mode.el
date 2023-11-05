@@ -28,6 +28,7 @@
 (require 'joplin-struct)
 (require 'joplin-http)
 (require 'joplin-gen)
+(require 'joplin-res)
 (require 'joplin-tags)
 
 ;; Entry points
@@ -599,8 +600,11 @@ JOPLIN-TM is a milliseconds. See Info node `(elisp)Time of Day'. "
     (joplin--init-context))
   (unless joplin-folders
     (joplin--init-folders))
-  (joplin--tags-init))
+  (joplin--tags-init)
+  (unless (file-directory-p joplin-resource-directory)
+    (make-directory joplin-resource-directory t))
 
+  (joplin--resource-cache-remove-expired))
 
 (defun joplin--init-context ()
   (let ((path (concat (file-name-as-directory user-emacs-directory)
@@ -1682,12 +1686,6 @@ Note that this function will destructively rebuild `joplin-notes'."
       (pop-mark))))
 
 
-(defun joplin-get-resource (rid)
-  (build-JRES
-   (joplin--http-get (concat "/resources/" rid)
-                     '((fields . "id,title,mime,updated_time,filename,file_extension,size")))))
-
-
 (defun joplin--buffer-resources (&optional buffer)
   "Return the list of resources (JRES struct) of the note buffer.
 
@@ -1725,18 +1723,6 @@ from JoplinApp."
 
           (setq-local joplin-resources
                       (mapcan (lambda (kv) (list (cdr kv))) resmap)))))))
-
-(defun joplin--register-resources (filename &optional title)
-  "Register new resource from FILENAME with optional TITLE.
-
-Returns new JRES struct of the resource."
-  (unless (file-readable-p filename)
-    (error "joplin: cannot read file %s" filename))
-  (or title
-      (setq title ""))
-  (let ((resp (joplin--http-post-attachment-url (list (cons 'title title))
-                                                filename)))
-    (build-JRES resp t)))
 
 (defconst joplin--markdown-regex-link-inline
   ;; Stealed from markdown-mode. Joplin may need to work without
@@ -1977,7 +1963,52 @@ Otherwise, it will set the tags of the current note buffer."
     (setq names (joplin--note-tag-names))
     (message "Tags: %s" (string-join names ", "))))
 
+(defun joplin-note-display-images ()
+  (interactive)
+  (when (and (boundp 'joplin-note-mode)
+             joplin-note-mode
+             (boundp 'joplin-resources))
+    ;; borrowed from `markdown-display-inline-images' and modified
+    (unless (display-images-p)
+      (error "Cannot show images"))
+    (save-excursion
+      (save-restriction
+        (widen)
+        (goto-char (point-min))
+        (while (re-search-forward joplin--markdown-regex-link-inline nil t)
+          (let* ((start (match-beginning 0))
+                 (imagep (match-beginning 1))
+                 (end (match-end 0))
+                 (rid (match-string-no-properties 6))
+                 file)
+            (when (and imagep
+                       (not (zerop (length rid)))
+                       (string-match "\\`:/\\([0-9a-fA-F]+\\)\\'" rid))
+              (setq rid (match-string 1 rid))
+              (setq file (joplin--http-get-resource-file (joplin-get-resource rid)))
+              (let* ((abspath (file-truename file))
+                     (image
+                      (cond ((and markdown-max-image-size
+                                  (image-type-available-p 'imagemagick))
+                             (create-image
+                              abspath 'imagemagick nil
+                              :max-width (car markdown-max-image-size)
+                              :max-height (cdr markdown-max-image-size)))
+                            (markdown-max-image-size
+                             (create-image abspath nil nil
+                                           :max-width (car markdown-max-image-size)
+                                           :max-height (cdr markdown-max-image-size)))
+                            (t (create-image abspath)))))
+                (when image
+                  (let ((ov (make-overlay start end)))
+                    (overlay-put ov 'display image)
+                    (overlay-put ov 'face 'default)
+                    (push ov markdown-inline-image-overlays)))))))))))
 
+(eval-after-load "markdown-mode"
+  (when (fboundp #'markdown-display-inline-images)
+    ;; tested with markdown-mode version 20231028.853
+    (advice-add 'markdown-display-inline-images :after #'joplin-note-display-images)))
 
 (provide 'joplin-mode)
 

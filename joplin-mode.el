@@ -1830,13 +1830,6 @@ It returns the JRES struct for the resources."
                                          " " "")
                                      "\\7\\8")))))))))
 
-(defun joplin--get-resource (rid)
-  "Return JRES struct retrive from JoplinApp"
-  (let (resp)
-    (setq resp (joplin--http-get (concat "/resources/" rid)
-                                 '((fields . "id,title,mime,filename,created_time,updated_time,user_created_time,user_updated_time,file_extension,encryption_cipher_text,encryption_applied,encryption_blob_encrypted"))))
-    (build-JRES resp)))
-
 
 (define-derived-mode joplin-resources-mode tabulated-list-mode "Note Resources"
   "Major mode for listing resources"
@@ -1851,8 +1844,8 @@ It returns the JRES struct for the resources."
   (setq-local joplin-parent-buffer nil)
 
   (let ((keymap joplin-resources-mode-map))
-    (define-key keymap [(control ?c) (control ?j)] #'joplin--jump-to-note-buffer)
-    (define-key keymap [(control ?c) ?j] #'joplin--jump-to-note-buffer)
+    (define-key keymap [(control ?c) (control ?j)] #'joplin-jump-to-note-buffer)
+    (define-key keymap [(control ?c) ?j] #'joplin-jump-to-note-buffer)
     (define-key keymap [?q] #'joplin-resources-window-quit)
     (define-key keymap [?i] #'joplin-show-properties)
     )
@@ -1905,7 +1898,7 @@ It returns the JRES struct for the resources."
     (setq tabulated-list-entries entries)
     (tabulated-list-init-header)))
 
-(defun joplin--jump-to-note-buffer (&optional arg)
+(defun joplin-jump-to-note-buffer (&optional arg)
   (interactive "P")
   (let ((notebuf joplin-parent-buffer)
         buf)
@@ -1963,6 +1956,19 @@ Otherwise, it will set the tags of the current note buffer."
     (setq names (joplin--note-tag-names))
     (message "Tags: %s" (string-join names ", "))))
 
+
+;;;###autoload
+(defun joplin-max-image-size ()
+  "Return the reasonable max image size"
+  ;; Ideally, image max height should be around 20 lines in pixel,
+  ;; max weight should be around 70% of window text width in pixel.
+  (let ((h (* 20 (line-pixel-height)))
+        (w (floor (* (frame-inner-width) 0.7))))
+    (and (<= h 0) (setq h 400))
+    (and (<= w 0) (setq w 400))
+    (cons w h)))
+
+
 (defun joplin-note-display-images ()
   (interactive)
   (when (and (boundp 'joplin-note-mode)
@@ -2008,7 +2014,8 @@ Otherwise, it will set the tags of the current note buffer."
 (eval-after-load "markdown-mode"
   (when (fboundp #'markdown-display-inline-images)
     ;; tested with markdown-mode version 20231028.853
-    (advice-add 'markdown-display-inline-images :after #'joplin-note-display-images)))
+    (advice-add 'markdown-display-inline-images :after
+                #'joplin-note-display-images)))
 
 (provide 'joplin-mode)
 

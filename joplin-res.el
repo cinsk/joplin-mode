@@ -35,6 +35,9 @@
                              ("image/tiff" . tiff)
                              ("image/jpeg" . jpeg)))
 
+(defun joplin-resource-to-emacs-type (res)
+  (alist-get (JRES-mime res) joplin-image-mimes nil nil #'equal))
+
 (defun joplin-resource-supported-p (res)
   (let ((type (alist-get (JRES-mime res) joplin-image-mimes nil nil #'equal)))
     (if (memq type image-types) t)))

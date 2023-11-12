@@ -975,10 +975,38 @@ See `joplin-switch-or-pop-to-buffer' for more details."
           (setq joplin-search-type 'folder))
         (current-buffer)))))
 
-;;;###autoload
-(defun joplin-search (&optional prefix text)
-  (interactive "p\nssearch: ")
+(defvar joplin-search-text-history nil
+  "")
 
+(defun joplin-read-search-string (&optional prompt)
+  (with-current-buffer-window (generate-new-buffer " *Jolin Search Help*")
+    '(display-buffer-at-bottom . ((dedicated . t)
+                                 (window-height . fit-window-to-buffer)))
+    (lambda (w v)
+      (with-selected-window w
+        (unwind-protect
+            (read-from-minibuffer (or prompt "search: ")
+                                  nil nil nil 'joplin-search-text-history)
+          (when (window-live-p w)
+            (quit-restore-window w 'kill)))))
+  (insert "text                   search for TEXT within the title and body of the note
+any:1 tag:t1 tag:t2    will return notes that have tag T1 or T2
+any:0 tag:t1 tag:t2    will return notes that have tag T1 and T2 (default)
+title:\"hi world\"     search notes for title contains \"hi\" and \"world\"
+title:hi -title:world  search notes for title contains \"hi\" but not \"world\".
+body:text              search notes within the body of the note with TEXT
+tag:be*ful             search notes with the tag matches with \"be*ful\"
+tag:*                  search notes with tags
+-tag:*                 search notes without tags
+notebook:text          search notes belong to the notebook TEXT
+sourceurl:*joplinapp.org   search notes with source URL (wildcard supported)
+resource:image/jpeg    search notes to get all notes with a jpeg attachment
+resource:image/*       search notes with any type of images.")
+  (help-mode)))
+
+;;;###autoload
+(defun joplin-search (&optional arg text)
+  (interactive (list current-prefix-arg (joplin-read-search-string)))
   (joplin--init)
   (let ((buf (joplin--search-buffer)))
     (when (> (length text) 0)
@@ -991,7 +1019,7 @@ See `joplin-switch-or-pop-to-buffer' for more details."
           (joplin--search-load)
           (goto-char (point-min))
           (joplin-search-point-to-title))))
-    (pop-to-buffer buf)))
+    (joplin-switch-or-pop-to-buffer buf arg)))
 
 
 (defun joplin-visit-folder (&optional arg)

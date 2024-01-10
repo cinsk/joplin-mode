@@ -114,6 +114,9 @@
   "Face for Joplin property value"
   :group 'joplin-faces)
 
+(defvar joplin-external-link-format "joplin://x-callback-url/openNote?id=%s"
+  "URL for launch JoplinApp note link")
+
 (defvar joplin-no-unicode-symbol nil)
 
 (defvar joplin-note)
@@ -144,10 +147,9 @@ It should never be larger than 100.
 See URL `https://joplinapp.org/api/references/rest_api/#pagination'.")
 
 (defvar joplin-folders nil
-  "ALIST of (FOLDER-ID . FOLDER) where FOLDER-ID is a string, and FOLDER is a JFOLDER struct")
+  "Alist of (FOLDER-ID . FOLDER) where FOLDER-ID is a string, and FOLDER is a JFOLDER struct.")
 (defvar joplin-child-folders nil
-  "ALIST of (FOLDER-ID . CHILDREN) where FOLDER-ID is a string, and CHILDREN
-is a list of JFOLDER struct.
+  "Alist of (FOLDER-ID . CHILDREN) where FOLDER-ID is a string, and CHILDREN is a list of JFOLDER struct.
 An empty string is used for the root folder id.")
 
 (defconst joplin-folder-id-column 46)
@@ -166,10 +168,13 @@ An empty string is used for the root folder id.")
     tmpfile))
 
 (defun joplin--cleanup ()
+  "Clean up temporary resources for `joplin-mode'.
+
+Best used for `kill-emacs-hook'."
   (delete-file joplin-temp-note-file))
 
 (defun joplin--get-api-token ()
-  "Get Joplin API token from JoplinApp"
+  "Get Joplin API token from JoplinApp."
   (condition-case e
       (let ((auth (alist-get 'auth_token (joplin--http-post "/auth" nil)))
             token)
@@ -185,7 +190,7 @@ An empty string is used for the root folder id.")
            nil)))
 
 (defun joplin--save-token (token)
-  "Save JoplinApp token for later uses"
+  "Save JoplinApp TOKEN for later use."
   (let ((path (concat (file-name-as-directory user-emacs-directory)
                       joplin-token-file)))
     (with-temp-buffer
@@ -194,7 +199,7 @@ An empty string is used for the root folder id.")
         (write-region (point-min) (point-max) path)))))
 
 (defun joplin--load-folders ()
-  "Read all folders in a vector of ALIST"
+  "Read all folders in a vector of alist."
   (let ((context (list (cons 'page 0)))
         (items [])
         (resp '((items . []) (has_more . t))))
@@ -207,7 +212,7 @@ An empty string is used for the root folder id.")
 
 
 (defun joplin--build-idmap (folders)
-  "Build an alist of (FOLDER-ID . JFOLDER) from FOLDERS
+  "Build an alist of (FOLDER-ID . JFOLDER) from FOLDERS.
 
 FOLDERS is a vector of alist of Joplin folder fields, available
 from `joplin--load-folders'."
@@ -222,7 +227,9 @@ from `joplin--load-folders'."
     idmap))
 
 (defun joplin--build-pcmap (folders idmap)
-  "Build an ALIST of (FOLDER-ID . (CHILD-JFOLDER ...)) from a vector, FOLDERS"
+  "Build an ALIST of (FOLDER-ID . (CHILD-JFOLDER ...)) from a vector, FOLDERS.
+
+IDMAP is an alist of (FOLDER-ID . JFOLDER)."
   (let (pcmap)
     (dotimes (i (length folders))
       (let* ((item (aref folders i))
@@ -231,22 +238,23 @@ from `joplin--load-folders'."
         (if record
             (setcdr record
                     (nconc (cdr record)
-                           (list (cdr (assoc (alist-get 'id item)
-                                             idmap)))))
+                           (list (alist-get (alist-get 'id item)
+                                             idmap nil nil #'equal))))
           (setq pcmap
                 (nconc pcmap
                        (list (cons (alist-get 'parent_id item)
-                                   (list (cdr (assoc (alist-get 'id item)
-                                                     idmap)))
+                                   (list (alist-get (alist-get 'id item)
+                                                    idmap nil nil #'equal))
                                    )))))))
     pcmap))
 
 (defun joplin--init-folders ()
-  ;; init(sync) joplin, build folder structure, etc.
+  "Init(sync) joplin, build folder structure, etc."
   (let ((folders (joplin--load-folders)))
     (joplin--parse-folders folders)))
 
 (defun joplin-sync-folders ()
+  "Reload Joplin folder structures, and render again."
   (interactive)
   (joplin--init-folders)
   (joplin--render-joplin-buffer))
@@ -260,7 +268,7 @@ from `joplin--load-folders'."
   (setq level (or level 0))
   (setq parent (or parent ""))
   ;; (message (format "DUMP %s [%s] %s" pcmap parent level))
-  (let ((children (cdr (assoc parent joplin-child-folders))))
+  (let ((children (alist-get parent joplin-child-folders nil nil #'equal)))
     (dolist (c children)
       ;; visit
       (funcall proc c level)
@@ -367,7 +375,7 @@ This function returns the folder id in string, or nil."
                         sel))))
     (setq resp (completing-read prompt sel nil 'require-match nil 'joplin-folder-name-history))
     (and resp
-         (cdr (assoc resp sel)))))
+         (alist-get resp sel nil nil #'equal))))
 
 (defun joplin--folder-id (&optional id)
   ;; TODO: remove this unused function if confirmed
@@ -380,7 +388,7 @@ This function returns the folder id in string, or nil."
   ;; TODO: remove this unused function if confirmed
   (let ((fid (joplin--folder-id id)))
     (and fid
-         (cdr (assoc fid joplin-folders)))))
+         (alist-get fid joplin-folders nil nil #'equal))))
 
 (defun joplin-emacs-time (tm)
   "Convert Joplin time JOPLIN-TM to Emacs timestamp.
@@ -507,7 +515,7 @@ JOPLIN-TM is a milliseconds. See Info node `(elisp)Time of Day'. "
 (defun joplin-switch-or-pop-to-buffer (buffer &optional switch)
   "If SWITCH is non-nil, `switch-to-buffer'. Otherwise `pop-to-buffer'."
   (if switch
-      (switch-to-buffer buf)
+      (switch-to-buffer buffer)
     (setq win (get-buffer-window buffer))
     (if win
         (select-window win)
@@ -644,10 +652,11 @@ JOPLIN-TM is a milliseconds. See Info node `(elisp)Time of Day'. "
 
 ;;;###autoload
 (defun joplin (&optional arg)
-  (interactive "p")
+  "Raise JoplinApp notebook buffer"
+  (interactive "P")
   ;; TODO: get token, then set `joplin-context'.
   (joplin--init)
-  (switch-to-buffer (joplin-buffer)))
+  (joplin-switch-or-pop-to-buffer (joplin-buffer) arg))
 
 (defun joplin--render-joplin-buffer ()
   (or joplin-folders
@@ -826,6 +835,7 @@ JOPLIN-TM is a milliseconds. See Info node `(elisp)Time of Day'. "
     ([(control ?c) ?j ?L] . joplin-resource-upload-all)
     ([(control ?c) ?j ?r] . joplin-note-list-resources)
     ([(control ?c) ?j ?t] . joplin-note-do-tags)
+    ([(control ?c) ?j ?v] . joplin-note-in-joplinapp)
     ))
 
 
@@ -899,6 +909,8 @@ JOPLIN-TM is a milliseconds. See Info node `(elisp)Time of Day'. "
         (define-key map [?q] #'quit-window)
         ;;(define-key map [?o] #'joplin-search-visit-note-other-window)
         (define-key map [?\r] #'joplin-search-visit-note)
+        (define-key map [(meta ?\r)] #'joplin-search-visit-note-in-joplinapp)
+        (define-key map [?O] #'joplin-search-visit-note-in-joplinapp)
 
         (define-key map [?i] #'joplin-show-properties)
 
@@ -924,6 +936,15 @@ JOPLIN-TM is a milliseconds. See Info node `(elisp)Time of Day'. "
 
 Argument NOTE is a JNOTE struct or note id in string."
   (format "*JoplinNote:%s*" (if (JNOTE-p note) (JNOTE-id note) note)))
+
+(defun joplin-search-visit-note-in-joplinapp ()
+  "Visit Joplin Note at the point in JoplinApp."
+  (interactive)
+  (let* ((note (joplin--search-note-at-point))
+         (noteid (and note (JNOTE-id note))))
+    (when noteid
+      (joplin-note-in-joplinapp noteid))))
+
 
 (defun joplin-search-visit-note (&optional arg)
   "Visit Joplin Note at the point.
@@ -1006,6 +1027,11 @@ resource:image/*       search notes with any type of images.")
 
 ;;;###autoload
 (defun joplin-search (&optional arg text)
+  "Search JoplinApp, raise the Joplin Search buffer.
+
+If the prefix argument ARG is non-nil, switch to the search
+buffer.  Otherwise display the buffer in other window.  You can
+supply TEXT if you want to call this function in the lisp code."
   (interactive (list current-prefix-arg (joplin-read-search-string)))
   (joplin--init)
   (let ((buf (joplin--search-buffer)))
@@ -2038,6 +2064,18 @@ Otherwise, it will set the tags of the current note buffer."
                     (overlay-put ov 'display image)
                     (overlay-put ov 'face 'default)
                     (push ov markdown-inline-image-overlays)))))))))))
+
+
+(defun joplin-note-in-joplinapp (&optional noteid)
+  "Launch JoplinApp to show the note, NOTEID."
+  (interactive)
+  (unless noteid
+    (setq noteid (and (boundp 'joplin-note)
+                      (JNOTE-id joplin-note))))
+  (if (null noteid)
+      (error "cannot find Joplin note id")
+    (browse-url (format joplin-external-link-format noteid))))
+
 
 (eval-after-load "markdown-mode"
   (when (fboundp #'markdown-display-inline-images)

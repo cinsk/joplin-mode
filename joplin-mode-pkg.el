@@ -1,4 +1,4 @@
-(define-package "joplin-mode" "20231026.2023" "Joplin mode"
+(define-package "joplin-mode" "202401009.2024" "Joplin mode"
   '((emacs "27.1"))
 
   :maintainers
